@@ -1,9 +1,8 @@
 import { Module } from '@nestjs/common';
-import { ReservationsController } from './reservations.controller';
 import { ReservationsService } from './reservations.service';
 
+// ReservationsController is declared in ChangesModule (see comment there).
 @Module({
-  controllers: [ReservationsController],
   providers: [ReservationsService],
   exports: [ReservationsService],
 })
