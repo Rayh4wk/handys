@@ -8,9 +8,9 @@
 
 | 명령 | 결과 |
 |---|---|
-| `npm test` | 서버 Jest 2 suites, 18 passed / 웹 Vitest 5 files, 51 passed |
-| `npm run test:int` | 6 suites, 38 passed (실제 PostgreSQL `handys_test`, 5.2 s) |
-| `npm run e2e` | 웹·서버 빌드 후 Playwright 11 passed (13.5 s, 13.6 s), `handys_e2e` 초기화 후 서버 포트 3100 |
+| `npm test` | 서버 Jest 2 suites, 18 passed / 웹 Vitest 5 files, 69 passed |
+| `npm run test:int` | 6 suites, 38 passed (실제 PostgreSQL `handys_test`, 4.5 s) |
+| `npm run e2e` | 웹·서버 빌드 후 Playwright 12 passed (14.6 s, 14.6 s), `handys_e2e` 초기화 후 서버 포트 3100 |
 | `npm run lint` | `eslint . --max-warnings 0`, 출력 없음(0 problems) |
 | `npm run typecheck` | server, web, e2e `tsc --noEmit` 오류 0 |
 
@@ -20,12 +20,12 @@ PASS src/inspection/judge.spec.ts
 PASS src/auth/session.spec.ts
 Tests:       18 passed, 18 total
 # npm test (apps/web)
- ✓ src/lib/kst.test.ts (7 tests)
+ ✓ src/lib/kst.test.ts (9 tests)
  ✓ src/realtime/useRealtime.test.tsx (11 tests)
  ✓ src/auth/AuthProvider.test.tsx (1 test)
- ✓ src/pages/OperationsPage.test.tsx (20 tests)
- ✓ src/pages/ReservationsPage.test.tsx (12 tests)
-      Tests  51 passed (51)
+ ✓ src/pages/ReservationsPage.test.tsx (18 tests)
+ ✓ src/pages/OperationsPage.test.tsx (30 tests)
+      Tests  69 passed (69)
 
 # npm run test:int
 PASS test/events.int-spec.ts
@@ -38,17 +38,18 @@ Tests:       38 passed, 38 total
 
 # npm run e2e
   ✓  1 demo-flow.spec.ts › demo flow: checkout change → conflict on ops → ops reschedules → agent sees normal (1.2s)
-  ✓  2 realtime.spec.ts › measures cross-screen latency (985ms)
-  ✓  3 realtime.spec.ts › recovers after SSE disconnect (2.8s)
+  ✓  2 realtime.spec.ts › measures cross-screen latency (1.1s)
+  ✓  3 realtime.spec.ts › recovers after SSE disconnect (2.9s)
   ✓  4 realtime.spec.ts › recovers after network offline (1.8s)
-  ✓  5 realtime.spec.ts › stale tab gets conflict notice (649ms)
-  ✓  6 roles.spec.ts › agent cannot open the operations screen (229ms)
-  ✓  7 roles.spec.ts › agent session gets 403 on the cleaning schedule API (200ms)
-  ✓  8 roles.spec.ts › anonymous visitor is sent to the login page (84ms)
-  ✓  9 roles.spec.ts › wrong password shows a login error (260ms)
-  ✓ 10 visual.spec.ts › login screen fits desktop and phone widths (225ms)
-  ✓ 11 visual.spec.ts › role screens fit desktop and phone widths (1.1s)
-  11 passed (13.5s)
+  ✓  5 realtime.spec.ts › stale tab gets conflict notice (717ms)
+  ✓  6 realtime.spec.ts › open ops form follows a remote change until edited (804ms)
+  ✓  7 roles.spec.ts › agent cannot open the operations screen (250ms)
+  ✓  8 roles.spec.ts › agent session gets 403 on the cleaning schedule API (236ms)
+  ✓  9 roles.spec.ts › anonymous visitor is sent to the login page (99ms)
+  ✓ 10 roles.spec.ts › wrong password shows a login error (276ms)
+  ✓ 11 visual.spec.ts › login screen fits desktop and phone widths (212ms)
+  ✓ 12 visual.spec.ts › role screens fit desktop and phone widths (1.1s)
+  12 passed (14.6s)
 ```
 
 테스트 계층: 판정 경계값은 단위 테스트(`judge.spec.ts`), 트랜잭션·잠금·동시 수정·권한은 실제 PostgreSQL을 쓰는 통합 테스트(`apps/server/test/*.int-spec.ts`, supertest), 두 화면 간 갱신·재연결은 빌드된 앱을 대상으로 한 Playwright 테스트(`e2e/tests`)에서 확인한다. 웹 단위 테스트는 `TZ=America/New_York`, e2e는 `timezoneId: America/New_York`에서 실행해 KST 변환이 브라우저 시간대에 의존하지 않음을 함께 확인한다.
@@ -66,7 +67,7 @@ Tests:       38 passed, 38 total
 | 5 | 필수 시각 누락 | 판정 불가 및 원인 표시 | 체크아웃 누락 → `UNDETERMINED`/`MISSING_CHECKOUT_AT`(청소 유무와 무관), 청소 시각 누락 → `UNDETERMINED`/`MISSING_CLEANING_START`, 화면에 "정보 누락"과 근거 문구 | `[unit]` judge.spec "missing checkoutAt with cleaning -> UNDETERMINED", "missing checkoutAt without cleaning -> MISSING_CHECKOUT_AT", "missing scheduledStartAt -> UNDETERMINED", "reason text" / `[web]` ReservationsPage "renders the table with 정보 누락 for missing checkout and disabled change for cancelled" |
 | 6 | 취소 예약 | 점검 대상 제외 | 시각이 충돌해도 `EXCLUDED`, 변경 시도는 422이고 판정은 `EXCLUDED` 유지, 변경 버튼 비활성 | `[unit]` judge.spec "cancelled reservation -> EXCLUDED even if conflicting" / `[int]` write-api "cancelled reservation change is 422 and inspection stays EXCLUDED" / `[web]` ReservationsPage (#5와 같은 테스트) |
 | 7 | 판정 저장 중 오류 | 예약 변경까지 롤백 | `InspectionRepository.upsert` 실패 시 500, 체크아웃·청소 시각과 version 원래 값, 이력 0건, 점검 결과 이전 값. SSE 미발행 | `[int]` write-api "rolls back reservation change when inspection save fails", "emits nothing when the transaction fails" |
-| 8 | 두 사용자가 같은 데이터를 수정 | 오래된 버전의 덮어쓰기 방지 | 오래된 version은 409 + `current`, DB 변경 없음. 같은 version 동시 요청은 [200, 409]. 편집 폼은 열린 시점 version을 보내며, 409 시 안내 후 최신 값으로 재설정 | `[int]` write-api "stale version returns 409 with current view and changes nothing", concurrency "only one of two concurrent writers with same version wins" / `[web]` ReservationsPage·OperationsPage "sends the … version captured when the … opened, even after a refetch", "treats a 409 without current as a conflict: notice, refetch, reset to latest", "shows conflict notice on 409 …" / `[e2e]` realtime "stale tab gets conflict notice" |
+| 8 | 두 사용자가 같은 데이터를 수정 | 오래된 버전의 덮어쓰기 방지 | 오래된 version은 409 + `current`, DB 변경 없음. 같은 version 동시 요청은 [200, 409]. 편집 폼은 입력값의 기준 version을 보낸다. 입력칸을 건드리지 않았으면 새 값·version을 따라가고, 고친 뒤라면 입력값과 이전 version을 유지하고 "다른 사용자가 HH:mm으로 변경했습니다"·"최신 값 불러오기"를 표시(저장 시 409). 409 시 안내 후 최신 값으로 재설정 | `[int]` write-api "stale version returns 409 with current view and changes nothing", concurrency "only one of two concurrent writers with same version wins" / `[web]` OperationsPage "follows a newer cleaning value (and its version) while the input is untouched", "keeps a typed value and its old version after a remote change, with a notice", ReservationsPage "follows a newer checkout …", "keeps a typed checkout …", 두 화면 "'최신 값 불러오기' adopts …", "treats a 409 without current as a conflict: notice, refetch, reset to latest", "shows conflict notice on 409 …" / `[e2e]` realtime "stale tab gets conflict notice", "open ops form follows a remote change until edited" |
 | 9 | 예약과 청소 일정 동시 수정 | 최종 저장값과 점검 결과 일치 | 체크아웃·청소 동시 변경 20회 반복 후 `judge(최종 DB 값)` = 저장된 판정, 이력 40건. 전체 재점검과 변경이 겹쳐도 오래된 판정을 쓰지 않음 | `[int]` concurrency "concurrent checkout and cleaning edits leave inspection consistent with final values", "concurrent runAll and checkout change leave inspection consistent with final values", "runAll waits for the reservation lock and never writes a stale judgment" |
 | 10 | 다른 운영 화면을 열어 둔 상태에서 변경 | 정상 연결 시 2초 안에 갱신 | 5회 측정 최대 4 ms(응답 종료 기준), 36 ms(요청 시작 기준). 데모 흐름에서 운영·예약 화면 모두 e2e 대기 제한 2초 안에 갱신(정밀한 값은 지연 측정 테스트) | `[e2e]` realtime "measures cross-screen latency", demo-flow / `[int]` events "streams reservation.updated as an unnamed event after a change", write-api "emits SSE only after commit" / `[web]` useRealtime "invalidates reservation queries on reservation.updated" |
 | 11 | SSE 연결 해제 중 변경 | 재연결 후 최신 상태 복구 | 끊긴 동안(2초) 이전 값 유지 + 끊김 경고, 다시 연결 후 2초 안에 최신 값. 네트워크 오프라인(1초) 후 복구 시 최신 값과 연결 상태 복원(약 0.6초, Task 9 보고) | `[e2e]` realtime "recovers after SSE disconnect", "recovers after network offline" / `[web]` useRealtime "invalidates all queries when connection opens", "goes to reconnecting on error and recreates after 3s when CLOSED", "pause closes the EventSource and sets disconnected", "resume opens a new one" |
@@ -113,6 +114,10 @@ Tests:       38 passed, 38 total
 | 결과 패널 청소 시작 | 저장 시점 값 유지, 변경 시 현재 값 추가 | "기존 청소 시작: 11:30" 유지, "현재 청소 시작: 13:30" 추가 | `[web]` ReservationsPage "keeps the cleaning start from save time and shows the current one when it changes" |
 | 시각 저장 형식 | `timestamptz` | `timestamptz`로 저장, 시점 일치 | `[int]` schema "stores timestamptz" |
 | KST 입력·표시 변환 | 브라우저 시간대와 무관하게 KST | 날짜 경계 포함 왕복 일치 | `[web]` kst "kstInputToIso converts KST local input to UTC ISO", "round-trips across the date boundary" 외 |
+| 운영 화면 실시간 알림 | 판정이 바뀌거나 새로 온 행 강조, 탭 제목에 조치 필요 건수, 스크린리더 안내 | 첫 로드는 강조 없음, 변경 행만 강조(동작 줄이기 설정에서는 정지 강조), "(3) 청소 일정 점검", "R-107 불일치, R-104 정상으로 변경" | `[web]` OperationsPage "highlights and announces rows whose judgment changed, not the first load", "puts the action-required count in the tab title" |
+| 운영 목록 정렬·효율 | 판정 우선순위 안에서 청소 시작 오름차순(없음은 뒤), 남은 시간, j/k·화살표 이동, Enter로 청소 입력칸, 체크아웃 +30분, 체크아웃보다 이른 시각 경고(저장은 허용) | 기대대로 동작 | `[web]` OperationsPage "sorts each status group by cleaning start, missing last, then id", "shows how far away each cleaning start is", "rows are buttons named by reservation; j/k and arrows move the selection", "Enter on a row opens it and focuses the cleaning input", "shows the checkout next to the cleaning input, fills +30 min and warns when earlier" / kst "relativeToNow" |
+| 결과 패널 안내·표시 | 결과가 비어 있는 live region으로 안내, 판정 배지 1개, 운영 조치자·시각 표시, 날짜가 갈리면 날짜 포함 | 기대대로 동작 | `[web]` ReservationsPage "announces through a live region that exists before the result", "shows one judgment badge and demotes the change button while a result is shown", "credits the operations fix when the judgment becomes NORMAL", "adds dates to the result when the times span two days" |
+| 좁은 화면 상세 닫기 | "목록으로"로 닫고 행으로 포커스 복귀 | 기대대로 동작 | `[web]` OperationsPage "목록으로 closes the detail panel and returns focus to the row" |
 | 화면 폭 1280px / 390px | 가로 스크롤 없음, 주요 영역 표시 | 통과 | `[e2e]` visual "login screen fits desktop and phone widths", "role screens fit desktop and phone widths" |
 
 ## 5. 검증 범위 밖

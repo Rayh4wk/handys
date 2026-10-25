@@ -51,17 +51,24 @@ export function inspectionRow(page: Page, id: string): Locator {
   return page.getByTestId(`inspection-row-${id}`);
 }
 
-/** Ops table columns: 0 id, 1 room, 2 checkout, 3 cleaning, 4 badge, 5 reason. */
+/**
+ * Ops table columns: 0 id, 1 room, 2 checkout, 3 cleaning, 4 badge, 5 reason. The cleaning cell
+ * also carries a relative line ("N시간 후"), so its time is read from `.time-main`.
+ */
 export function opsCell(page: Page, id: string, col: 'checkout' | 'cleaning'): Locator {
-  return inspectionRow(page, id).locator('td').nth(col === 'checkout' ? 2 : 3);
+  const cell = inspectionRow(page, id).locator('td');
+  return col === 'checkout' ? cell.nth(2) : cell.nth(3).locator('.time-main');
 }
 
 export function badge(row: Locator): Locator {
   return row.getByTestId('status-badge');
 }
 
+/** Ops list filter via the summary tiles: 'ALL', 'ACTION_REQUIRED' or a judgment status. */
 export async function setOpsFilter(page: Page, value: string): Promise<void> {
-  await page.getByTestId('status-filter').selectOption(value);
+  const tile = page.getByTestId(`summary-${value}`);
+  await tile.click();
+  await expect(tile).toHaveAttribute('aria-pressed', 'true');
 }
 
 /** Opens the checkout editor for a reservation on the agent screen. */

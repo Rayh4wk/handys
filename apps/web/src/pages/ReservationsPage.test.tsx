@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ApiError, api } from '../api/client';
 import { makeReservation, renderWithClient } from '../test/fixtures';
@@ -42,10 +42,10 @@ beforeEach(() => {
 
 async function openEditor(id = 'R-101') {
   const user = userEvent.setup();
-  renderWithClient(<ReservationsPage />);
+  const { queryClient } = renderWithClient(<ReservationsPage />);
   const row = await screen.findByTestId(`reservation-row-${id}`);
   await user.click(within(row).getByRole('button', { name: '체크아웃 변경' }));
-  return { user, editor: screen.getByTestId('checkout-editor') };
+  return { user, queryClient, editor: screen.getByTestId('checkout-editor') };
 }
 
 describe('ReservationsPage', () => {
@@ -66,7 +66,7 @@ describe('ReservationsPage', () => {
     const user = userEvent.setup();
     renderWithClient(<ReservationsPage />);
     const r105 = await screen.findByTestId('reservation-row-R-105');
-    r105.focus();
+    within(r105).getByRole('button', { name: 'R-105 상세 보기' }).focus();
     await user.keyboard('{Enter}');
     const panel = screen.getByRole('region', { name: '선택한 예약' });
     expect(panel).toHaveTextContent('R-105');
@@ -205,34 +205,72 @@ describe('ReservationsPage', () => {
     expect(within(panel).getByTestId('current-cleaning')).toHaveTextContent('현재 청소 시작: 13:30');
   });
 
-  it('sends the version captured when the editor opened, even after a refetch', async () => {
-    const { user, queryClient } = await (async () => {
-      const u = userEvent.setup();
-      const utils = renderWithClient(<ReservationsPage />);
-      const row = await screen.findByTestId('reservation-row-R-101');
-      await u.click(within(row).getByRole('button', { name: '체크아웃 변경' }));
-      return { user: u, queryClient: utils.queryClient };
-    })();
-    // another user changed the checkout to 12:00 (version 2); SSE refetch delivers it
-    mocked.listReservations.mockResolvedValue(
-      fixture().map((r) =>
-        r.id === 'R-101' ? makeReservation('R-101', { checkoutAt: '2026-10-26T03:00:00.000Z', version: 2 }) : r,
-      ),
+  // another user changed the checkout to 12:00 (version 2); the SSE refetch delivers it
+  const movedByOther = () =>
+    fixture().map((r) =>
+      r.id === 'R-101' ? makeReservation('R-101', { checkoutAt: '2026-10-26T03:00:00.000Z', version: 2 }) : r,
     );
+
+  it('follows a newer checkout (and its version) while the input is untouched', async () => {
+    const user = userEvent.setup();
+    const { queryClient } = renderWithClient(<ReservationsPage />);
+    const row = await screen.findByTestId('reservation-row-R-101');
+    await user.click(within(row).getByRole('button', { name: '체크아웃 변경' }));
+    mocked.listReservations.mockResolvedValue(movedByOther());
+    await queryClient.invalidateQueries();
+    await waitFor(() => expect(screen.getByTestId('checkout-input')).toHaveValue('2026-10-26T12:00'));
+    expect(screen.queryByTestId('remote-change-notice')).not.toBeInTheDocument();
+    mocked.changeCheckout.mockResolvedValue(conflictResponse);
+    await user.type(screen.getByTestId('checkout-reason'), '고객 요청');
+    await user.click(screen.getByTestId('checkout-save'));
+    expect(mocked.changeCheckout).toHaveBeenCalledWith('R-101', {
+      checkoutAt: '2026-10-26T03:00:00.000Z',
+      reason: '고객 요청',
+      version: 2,
+    });
+  });
+
+  it('keeps a typed checkout and its old version after a remote change, with a notice', async () => {
+    const user = userEvent.setup();
+    const { queryClient } = renderWithClient(<ReservationsPage />);
+    const row = await screen.findByTestId('reservation-row-R-101');
+    await user.click(within(row).getByRole('button', { name: '체크아웃 변경' }));
+    fireEvent.change(screen.getByTestId('checkout-input'), { target: { value: '2026-10-26T14:00' } });
+    mocked.listReservations.mockResolvedValue(movedByOther());
     await queryClient.invalidateQueries();
     await waitFor(() =>
       expect(screen.getByTestId('reservation-row-R-101')).toHaveTextContent('10/26 12:00'),
     );
+    expect(screen.getByTestId('remote-change-notice')).toHaveTextContent(
+      '다른 사용자가 12:00으로 변경했습니다.',
+    );
+    expect(screen.getByTestId('checkout-input')).toHaveValue('2026-10-26T14:00');
     mocked.changeCheckout.mockRejectedValue(new ApiError(409, { message: 'VERSION_CONFLICT' }));
-    const editor = screen.getByTestId('checkout-editor');
-    await user.type(within(editor).getByTestId('checkout-reason'), '고객 요청');
-    await user.click(within(editor).getByTestId('checkout-save'));
+    await user.type(screen.getByTestId('checkout-reason'), '고객 요청');
+    await user.click(screen.getByTestId('checkout-save'));
     expect(mocked.changeCheckout).toHaveBeenCalledWith('R-101', {
-      checkoutAt: '2026-10-26T02:00:00.000Z',
+      checkoutAt: '2026-10-26T05:00:00.000Z',
       reason: '고객 요청',
       version: 1,
     });
     expect(await screen.findByTestId('conflict-notice')).toBeInTheDocument();
+  });
+
+  it('"최신 값 불러오기" adopts the remote checkout and version', async () => {
+    const user = userEvent.setup();
+    const { queryClient } = renderWithClient(<ReservationsPage />);
+    const row = await screen.findByTestId('reservation-row-R-101');
+    await user.click(within(row).getByRole('button', { name: '체크아웃 변경' }));
+    fireEvent.change(screen.getByTestId('checkout-input'), { target: { value: '2026-10-26T14:00' } });
+    mocked.listReservations.mockResolvedValue(movedByOther());
+    await queryClient.invalidateQueries();
+    await user.click(await screen.findByTestId('remote-change-reload'));
+    expect(screen.getByTestId('checkout-input')).toHaveValue('2026-10-26T12:00');
+    expect(screen.queryByTestId('remote-change-notice')).not.toBeInTheDocument();
+    mocked.changeCheckout.mockResolvedValue(conflictResponse);
+    await user.type(screen.getByTestId('checkout-reason'), '고객 요청');
+    await user.click(screen.getByTestId('checkout-save'));
+    expect(mocked.changeCheckout).toHaveBeenCalledWith('R-101', expect.objectContaining({ version: 2 }));
   });
 
   it('treats a 409 without current as a conflict: notice, refetch, reset to latest', async () => {
@@ -258,5 +296,98 @@ describe('ReservationsPage', () => {
     mocked.changeCheckout.mockClear();
     await user.click(screen.getByTestId('checkout-save'));
     expect(mocked.changeCheckout).toHaveBeenCalledWith('R-101', expect.objectContaining({ version: 2 }));
+  });
+});
+
+describe('ReservationsPage change result', () => {
+  async function saveConflict() {
+    mocked.changeCheckout.mockResolvedValue(conflictResponse);
+    const { user, editor, queryClient } = await openEditor();
+    fireEvent.change(within(editor).getByTestId('checkout-input'), {
+      target: { value: '2026-10-26T13:00' },
+    });
+    await user.type(within(editor).getByTestId('checkout-reason'), '고객 요청');
+    mocked.listReservations.mockResolvedValue(
+      fixture().map((r) => (r.id === 'R-101' ? conflictResponse : r)),
+    );
+    await user.click(within(editor).getByTestId('checkout-save'));
+    return { user, queryClient, panel: await screen.findByTestId('change-result') };
+  }
+
+  it('announces through a live region that exists before the result', async () => {
+    renderWithClient(<ReservationsPage />);
+    const live = screen.getByTestId('result-announcer');
+    expect(live).toHaveAttribute('aria-live', 'polite');
+    expect(live).toBeEmptyDOMElement();
+    cleanup();
+    await saveConflict();
+    expect(screen.getByTestId('result-announcer')).toHaveTextContent(
+      '예약 변경 완료. 청소 일정 조정 필요.',
+    );
+    expect(screen.getByTestId('change-result')).not.toHaveAttribute('aria-live');
+  });
+
+  it('shows one judgment badge and demotes the change button while a result is shown', async () => {
+    const { panel } = await saveConflict();
+    expect(within(panel).queryByTestId('status-badge')).not.toBeInTheDocument();
+    const detail = screen.getByRole('region', { name: '선택한 예약' });
+    expect(within(detail).getAllByTestId('status-badge')).toHaveLength(1);
+    const again = within(detail).getByRole('button', { name: '체크아웃 변경' });
+    expect(again).not.toHaveClass('primary');
+  });
+
+  it('credits the operations fix when the judgment becomes NORMAL', async () => {
+    mocked.auditLogs.mockResolvedValue([
+      {
+        id: '1',
+        action: 'CHECKOUT_CHANGED',
+        before: { checkoutAt: '2026-10-26T02:00:00.000Z', inspectionStatus: 'NORMAL' },
+        after: { checkoutAt: '2026-10-26T04:00:00.000Z', inspectionStatus: 'CONFLICT' },
+        reason: '고객 요청',
+        actor: { id: 'agent-01', displayName: '예약 담당 김예약', role: 'RESERVATION_AGENT' },
+        createdAt: '2026-10-25T00:00:00.000Z',
+      },
+    ]);
+    const { panel, queryClient } = await saveConflict();
+    expect(within(panel).queryByTestId('result-resolved')).not.toBeInTheDocument();
+
+    const fixed = makeReservation('R-101', {
+      checkoutAt: '2026-10-26T04:00:00.000Z',
+      cleaning: { scheduledStartAt: '2026-10-26T04:30:00.000Z', version: 2 },
+      status: 'NORMAL',
+      version: 2,
+    });
+    fixed.inspection!.checkedAt = '2026-10-25T12:47:00.000Z';
+    mocked.listReservations.mockResolvedValue(fixture().map((r) => (r.id === 'R-101' ? fixed : r)));
+    mocked.auditLogs.mockResolvedValue([
+      {
+        id: '2',
+        action: 'CLEANING_RESCHEDULED',
+        before: { scheduledStartAt: '2026-10-26T02:30:00.000Z', inspectionStatus: 'CONFLICT' },
+        after: { scheduledStartAt: '2026-10-26T04:30:00.000Z', inspectionStatus: 'NORMAL' },
+        reason: null,
+        actor: { id: 'ops-01', displayName: '현장 운영 박현장', role: 'OPERATIONS_MANAGER' },
+        createdAt: '2026-10-25T12:47:00.000Z',
+      },
+    ]);
+    await queryClient.invalidateQueries();
+    await waitFor(() => expect(panel).toHaveAttribute('data-result', 'NORMAL'));
+    expect(await within(panel).findByTestId('result-resolved')).toHaveTextContent(
+      '청소 일정 조정됨 · 현장 운영 박현장 21:47',
+    );
+  });
+
+  it('adds dates to the result when the times span two days', async () => {
+    const late = makeReservation('R-101', { checkoutAt: '2026-10-26T15:30:00.000Z', status: 'NORMAL', version: 2 });
+    mocked.changeCheckout.mockResolvedValue(late);
+    const { user, editor } = await openEditor();
+    fireEvent.change(within(editor).getByTestId('checkout-input'), {
+      target: { value: '2026-10-27T00:30' },
+    });
+    await user.type(within(editor).getByTestId('checkout-reason'), '고객 요청');
+    await user.click(within(editor).getByTestId('checkout-save'));
+    const panel = await screen.findByTestId('change-result');
+    expect(panel).toHaveTextContent('체크아웃: 10/26 11:00 → 10/27 00:30');
+    expect(panel).toHaveTextContent('기존 청소 시작: 10/26 11:30');
   });
 });

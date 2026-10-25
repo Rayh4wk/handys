@@ -49,7 +49,7 @@ test('role screens fit desktop and phone widths', async ({ browser }) => {
     B = await openAs(browser, 'ops');
     await inspectionRow(B.page, 'R-103').click();
     await expect(B.page.getByTestId('audit-log-item').first()).toBeVisible();
-    await check(B.page, 'operations-detail', ['summary-CONFLICT', 'status-filter', 'detail-panel']);
+    await check(B.page, 'operations-detail', ['summary-CONFLICT', 'summary-ALL', 'detail-panel']);
   } finally {
     await A.context.close();
     await B?.context.close();

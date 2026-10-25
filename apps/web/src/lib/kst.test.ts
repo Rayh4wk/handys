@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   formatKst,
   formatKstClock,
-  formatKstDateTime,
   formatKstTime,
   isoToKstInput,
+  kstInputAfter,
   kstInputToIso,
+  relativeToNow,
+  sameKstDay,
 } from './kst';
 
 describe('kst', () => {
@@ -25,8 +27,23 @@ describe('kst', () => {
     expect(formatKst(null)).toBe('');
     expect(formatKstTime(null)).toBe('');
   });
-  it('formatKstDateTime', () => {
-    expect(formatKstDateTime('2026-10-26T04:00:05.000Z')).toBe('2026-10-26 13:00:05');
+  it('sameKstDay compares KST calendar days', () => {
+    // 23:30 and 00:30 KST on consecutive days, though both are 10/25 in UTC
+    expect(sameKstDay('2026-10-25T14:30:00.000Z', '2026-10-25T15:30:00.000Z')).toBe(false);
+    expect(sameKstDay('2026-10-26T02:00:00.000Z', '2026-10-26T04:30:00.000Z', null)).toBe(true);
+    expect(sameKstDay(null, undefined)).toBe(true);
+  });
+  it('relativeToNow', () => {
+    const now = Date.parse('2026-10-26T02:00:00.000Z');
+    expect(relativeToNow('2026-10-26T02:00:30.000Z', now)).toBe('1분 후');
+    expect(relativeToNow('2026-10-26T02:45:00.000Z', now)).toBe('45분 후');
+    expect(relativeToNow('2026-10-26T04:59:00.000Z', now)).toBe('2시간 후');
+    expect(relativeToNow('2026-10-26T02:00:00.000Z', now)).toBe('지남');
+    expect(relativeToNow('2026-10-26T01:00:00.000Z', now)).toBe('지남');
+  });
+  it('kstInputAfter', () => {
+    expect(kstInputAfter('2026-10-26T04:00:00.000Z', 30)).toBe('2026-10-26T13:30');
+    expect(kstInputAfter('2026-10-26T14:45:00.000Z', 30)).toBe('2026-10-27T00:15');
   });
   it('formatKstClock', () => {
     expect(formatKstClock('2026-10-26T04:00:05.000Z')).toBe('13:00:05');

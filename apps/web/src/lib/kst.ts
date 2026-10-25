@@ -31,10 +31,30 @@ export function formatKstTime(iso: string | null): string {
   return `${k.h}:${k.mi}`;
 }
 
-/** "YYYY-MM-DD HH:mm:ss" in KST */
-export function formatKstDateTime(iso: string): string {
-  const k = parts(iso);
-  return `${k.y}-${k.mo}-${k.d} ${k.h}:${k.mi}:${k.s}`;
+/** True when every given instant falls on the same KST calendar day (nulls are ignored). */
+export function sameKstDay(...isos: (string | null | undefined)[]): boolean {
+  const days = new Set(
+    isos.filter((v): v is string => !!v).map((iso) => {
+      const k = parts(iso);
+      return `${k.y}-${k.mo}-${k.d}`;
+    }),
+  );
+  return days.size <= 1;
+}
+
+/** "N분 후" / "N시간 후" until `iso`, or "지남" once it is not in the future. */
+export function relativeToNow(iso: string, now: number): string {
+  const ms = Date.parse(iso) - now;
+  if (Number.isNaN(ms)) return '';
+  if (ms <= 0) return '지남';
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${Math.max(1, minutes)}분 후`;
+  return `${Math.floor(minutes / 60)}시간 후`;
+}
+
+/** ISO + minutes -> datetime-local value (KST). */
+export function kstInputAfter(iso: string, minutes: number): string {
+  return isoToKstInput(new Date(Date.parse(iso) + minutes * 60_000).toISOString());
 }
 
 /** "HH:mm:ss" in KST */

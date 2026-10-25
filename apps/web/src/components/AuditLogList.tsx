@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { api, queryKeys } from '../api/client';
 import { ACTION_LABEL, ROLE_LABEL, STATUS_LABEL, type AuditLogView, type AuditSnapshot } from '../api/types';
-import { formatKst, formatKstDateTime } from '../lib/kst';
+import { formatKst } from '../lib/kst';
 
 const NONE = '정보 없음';
 
@@ -41,7 +41,7 @@ export default function AuditLogList({ reservationId }: { reservationId: string 
           <div className="audit-head">
             <strong>{ACTION_LABEL[log.action] ?? log.action}</strong>
             <time className="tnum" dateTime={log.createdAt}>
-              {formatKstDateTime(log.createdAt)}
+              {formatKst(log.createdAt)}
             </time>
           </div>
           <dl className="audit-diff">

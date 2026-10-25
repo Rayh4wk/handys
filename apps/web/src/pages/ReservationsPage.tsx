@@ -1,24 +1,26 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { api, queryKeys } from '../api/client';
-import type { InspectionStatus, ReservationView } from '../api/types';
+import { STATUS_LABEL, type InspectionStatus, type ReservationView } from '../api/types';
 import AuditLogList from '../components/AuditLogList';
+import RemoteChangeNotice from '../components/RemoteChangeNotice';
 import SaveNoticeView from '../components/SaveNoticeView';
 import StatusBadge from '../components/StatusBadge';
 import TimeCompare from '../components/TimeCompare';
-import { isoToKstInput, kstInputToIso } from '../lib/kst';
-import { scrollIntoViewOnNarrow } from '../lib/scroll';
+import { formatKst, formatKstTime, isoToKstInput, kstInputToIso, sameKstDay } from '../lib/kst';
+import { focusRow, scrollIntoViewOnNarrow } from '../lib/scroll';
+import { useServerDraft } from '../lib/useServerDraft';
 import {
+  MISSING,
+  NO_TASK,
   activeCleaning,
   applyServerView,
   byId,
   checkoutText,
-  cleaningTimeText,
   isConflict,
   refreshAfterConflict,
   errorText,
   statusOf,
-  timeOrMissing,
   type SaveNotice,
 } from '../lib/reservation';
 
@@ -34,10 +36,18 @@ interface ChangeResult {
   reservationId: string;
   previousCheckoutAt: string | null;
   newCheckoutAt: string | null;
-  /** "HH:mm" (or 작업 없음/정보 누락) of the cleaning start as it was when the change was saved. */
-  cleaningAtSave: string;
-  /** Fallbacks used until the list reflects the saved reservation. */
+  /** The reservation as the save returned it (cleaning start at save time, fallback judgment). */
   saved: ReservationView;
+  /** Server time of the save's judgment; later cleaning changes are attributed after this. */
+  savedAt: string;
+}
+
+/** The judgment line a screen reader hears for a change result (also when it later changes). */
+function resultAnnouncement(status: InspectionStatus | null): string {
+  if (!status) return '예약 변경 완료';
+  return status === 'CONFLICT'
+    ? `예약 변경 완료. 청소 일정 조정 필요. ${GUIDANCE.CONFLICT}`
+    : `예약 변경 완료. ${GUIDANCE[status]}`;
 }
 
 export default function ReservationsPage() {
@@ -45,13 +55,28 @@ export default function ReservationsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [result, setResult] = useState<ChangeResult | null>(null);
+  const [returnFocus, setReturnFocus] = useState<{ id: string } | null>(null);
 
   const rows = useMemo(() => [...(q.data ?? [])].sort(byId), [q.data]);
   const selected = rows.find((r) => r.id === selectedId) ?? null;
+  const resultShown = !!result && !!selected && result.reservationId === selected.id;
+  const resultCurrent = result ? rows.find((r) => r.id === result.reservationId) ?? result.saved : null;
+  const announced = result && resultCurrent ? resultAnnouncement(statusOf(resultCurrent)) : '';
+
+  useEffect(() => {
+    if (returnFocus) focusRow(`reservation-row-${returnFocus.id}`);
+  }, [returnFocus]);
 
   function select(id: string) {
     setSelectedId(id);
     if (editingId !== id) setEditingId(null);
+  }
+
+  function closeDetail() {
+    if (!selectedId) return;
+    setReturnFocus({ id: selectedId });
+    setSelectedId(null);
+    setEditingId(null);
   }
 
   return (
@@ -59,6 +84,10 @@ export default function ReservationsPage() {
       <div className="page-head">
         <h1>예약 관리</h1>
       </div>
+      {/* Mounted empty before any result so the first announcement is not lost. */}
+      <p className="sr-only" role="status" aria-live="polite" data-testid="result-announcer">
+        {announced}
+      </p>
 
       {q.isPending && <p className="muted state-line">예약 목록을 불러오는 중…</p>}
       {q.isError && <p className="error state-line">예약 목록을 불러오지 못했습니다.</p>}
@@ -98,19 +127,12 @@ export default function ReservationsPage() {
                         cancelled ? 'row-cancelled' : '',
                       ].join(' ')}
                       aria-current={r.id === selectedId ? 'true' : undefined}
-                      tabIndex={0}
                       onClick={() => select(r.id)}
-                      onKeyDown={(e) => {
-                        // Only the row itself: Enter/Space on the row button keep their own action.
-                        if (e.target !== e.currentTarget) return;
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          select(r.id);
-                        }
-                      }}
                     >
                       <td className="cell-id" data-label="예약 번호">
-                        {r.id}
+                        <button type="button" className="row-select" aria-label={`${r.id} 상세 보기`}>
+                          {r.id}
+                        </button>
                       </td>
                       <td data-label="객실">{r.roomId}</td>
                       <td className="cell-guest" data-label="고객">
@@ -156,8 +178,13 @@ export default function ReservationsPage() {
               key={selected.id}
             >
               <div className="detail-head">
-                <h2>{selected.id}</h2>
+                <h2 tabIndex={-1} data-detail-heading>
+                  {selected.id}
+                </h2>
                 <StatusBadge status={statusOf(selected)} />
+                <button type="button" className="btn-small btn-ghost detail-close" onClick={closeDetail}>
+                  목록으로
+                </button>
               </div>
               <dl className="facts">
                 <dt>객실</dt>
@@ -187,15 +214,17 @@ export default function ReservationsPage() {
                 />
               ) : (
                 <div className="detail-actions">
-                  <button type="button" className="primary" onClick={() => setEditingId(selected.id)}>
+                  <button
+                    type="button"
+                    className={resultShown ? undefined : 'primary'}
+                    onClick={() => setEditingId(selected.id)}
+                  >
                     체크아웃 변경
                   </button>
                 </div>
               )}
 
-              {result && result.reservationId === selected.id && (
-                <ChangeResultPanel result={result} current={selected} />
-              )}
+              {resultShown && result && <ChangeResultPanel result={result} current={selected} />}
 
               <h3 className="section-title">변경 이력</h3>
               <AuditLogList reservationId={selected.id} />
@@ -219,10 +248,6 @@ function CheckoutEditor({
   onCancel(): void;
 }) {
   const queryClient = useQueryClient();
-  const [input, setInput] = useState(() => isoToKstInput(reservation.checkoutAt));
-  // Optimistic lock: the version of the data the user is editing, captured when the editor
-  // opens — not the live list value, so a concurrent change (seen via SSE) still yields a 409.
-  const [baseVersion, setBaseVersion] = useState(reservation.version);
   const [reason, setReason] = useState('');
   const [notice, setNotice] = useState<SaveNotice | null>(null);
 
@@ -230,6 +255,10 @@ function CheckoutEditor({
     mutationFn: (body: { checkoutAt: string; reason: string; version: number }) =>
       api.changeCheckout(reservation.id, body),
   });
+  // Optimistic lock: the save sends draft.baseVersion — the version the input is based on, which
+  // follows a newer server value only while the input is untouched (see useServerDraft).
+  const draft = useServerDraft(isoToKstInput(reservation.checkoutAt), reservation.version, mutation.isPending);
+  const { input } = draft;
 
   const canSave = !!input && reason.trim().length > 0 && !mutation.isPending;
 
@@ -246,7 +275,7 @@ function CheckoutEditor({
     setNotice(null);
     const previousCheckoutAt = reservation.checkoutAt;
     mutation.mutate(
-      { checkoutAt, reason: reason.trim(), version: baseVersion },
+      { checkoutAt, reason: reason.trim(), version: draft.baseVersion },
       {
         onSuccess: (saved) => {
           applyServerView(queryClient, saved);
@@ -254,8 +283,8 @@ function CheckoutEditor({
             reservationId: saved.id,
             previousCheckoutAt,
             newCheckoutAt: saved.checkoutAt,
-            cleaningAtSave: cleaningTimeText(saved),
             saved,
+            savedAt: saved.inspection?.checkedAt ?? new Date().toISOString(),
           });
         },
         onError: (err) => {
@@ -266,8 +295,7 @@ function CheckoutEditor({
           setNotice({ kind: 'conflict' });
           void refreshAfterConflict(queryClient, err, reservation.id).then((latest) => {
             if (!latest) return;
-            setInput(isoToKstInput(latest.checkoutAt));
-            setBaseVersion(latest.version);
+            draft.reset(isoToKstInput(latest.checkoutAt), latest.version);
           });
         },
       },
@@ -286,7 +314,7 @@ function CheckoutEditor({
             type="datetime-local"
             data-testid="checkout-input"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => draft.edit(e.target.value)}
             required
           />
         </label>
@@ -304,6 +332,12 @@ function CheckoutEditor({
           />
         </label>
       </div>
+      {draft.remoteChanged && notice?.kind !== 'conflict' && (
+        <RemoteChangeNotice
+          latestAt={reservation.checkoutAt}
+          onReload={() => draft.reset(isoToKstInput(reservation.checkoutAt), reservation.version)}
+        />
+      )}
       <SaveNoticeView notice={notice} />
       <div className="editor-actions">
         <button type="submit" className="primary" data-testid="checkout-save" disabled={!canSave}>
@@ -317,17 +351,45 @@ function CheckoutEditor({
   );
 }
 
+/** Cleaning start of `r` in the given format, or 작업 없음 / 정보 누락. */
+function cleaningLabel(r: ReservationView, fmt: (iso: string) => string): string {
+  const task = activeCleaning(r);
+  if (!task) return NO_TASK;
+  return task.scheduledStartAt ? fmt(task.scheduledStartAt) : MISSING;
+}
+
 function ChangeResultPanel({ result, current }: { result: ChangeResult; current: ReservationView }) {
   // The judgment follows the latest data (SSE refetch), so an operations fix shows up here.
   const status = statusOf(current) ?? statusOf(result.saved);
   const conflict = status === 'CONFLICT';
-  const cleaningNow = cleaningTimeText(current);
+  const logs = useQuery({
+    queryKey: queryKeys.auditLogs(current.id),
+    queryFn: () => api.auditLogs(current.id),
+  });
+
+  const cleaningAtSave = activeCleaning(result.saved)?.scheduledStartAt ?? null;
+  const cleaningNowAt = activeCleaning(current)?.scheduledStartAt ?? null;
+  // One format for the whole panel: the date only appears when the times span more than one day.
+  const fmt = sameKstDay(result.previousCheckoutAt, result.newCheckoutAt, cleaningAtSave, cleaningNowAt)
+    ? (iso: string) => formatKstTime(iso)
+    : (iso: string) => formatKst(iso);
+  const timeText = (iso: string | null) => (iso ? fmt(iso) : MISSING);
+  const savedCleaning = cleaningLabel(result.saved, fmt);
+  const cleaningNow = cleaningLabel(current, fmt);
+
+  // Who resolved it: the latest cleaning reschedule after this change, once the judgment is NORMAL.
+  const resolvedBy =
+    status === 'NORMAL'
+      ? (logs.data ?? [])
+          .filter((l) => l.action === 'CLEANING_RESCHEDULED' && l.createdAt > result.savedAt)
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+      : undefined;
+
   return (
     <section
       className={`result-panel ${status ? `result-${status}` : ''}`}
       data-testid="change-result"
       data-result={status ?? 'UNKNOWN'}
-      aria-live="polite"
     >
       <div className="result-done">
         <span className="result-check" aria-hidden />
@@ -335,23 +397,33 @@ function ChangeResultPanel({ result, current }: { result: ChangeResult; current:
       </div>
       <ul className="result-facts">
         <li>
-          체크아웃: <span className="was">{timeOrMissing(result.previousCheckoutAt)}</span> →{' '}
-          <span className="now">{timeOrMissing(result.newCheckoutAt)}</span>
+          체크아웃: <span className="was">{timeText(result.previousCheckoutAt)}</span> →{' '}
+          <span className="now">{timeText(result.newCheckoutAt)}</span>
         </li>
-        <li>기존 청소 시작: {result.cleaningAtSave}</li>
-        {cleaningNow !== result.cleaningAtSave && (
+        <li>기존 청소 시작: {savedCleaning}</li>
+        {cleaningNow !== savedCleaning && (
           <li data-testid="current-cleaning">현재 청소 시작: {cleaningNow}</li>
         )}
       </ul>
       <div className="result-judgment">
-        <div className="result-judgment-head">
-          {conflict && <p className="result-alert">청소 일정 조정 필요</p>}
-          <StatusBadge status={status} />
-        </div>
-        {status && <p className="result-guidance">{GUIDANCE[status]}</p>}
+        {conflict && <p className="result-alert">청소 일정 조정 필요</p>}
+        {status && (
+          <p className="result-guidance">
+            <span className="sr-only">{STATUS_LABEL[status]}: </span>
+            {GUIDANCE[status]}
+          </p>
+        )}
+        {resolvedBy && (
+          <p className="result-resolved" data-testid="result-resolved">
+            청소 일정 조정됨 · {resolvedBy.actor.displayName}{' '}
+            <time className="tnum" dateTime={resolvedBy.createdAt}>
+              {formatKstTime(resolvedBy.createdAt)}
+            </time>
+          </p>
+        )}
         <TimeCompare
           checkoutAt={current.checkoutAt}
-          cleaningAt={activeCleaning(current)?.scheduledStartAt ?? null}
+          cleaningAt={cleaningNowAt}
           status={status}
         />
       </div>

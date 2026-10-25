@@ -1,19 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { api, queryKeys } from '../api/client';
 import { STATUS_LABEL, type InspectionStatus, type ReservationView } from '../api/types';
 import AuditLogList from '../components/AuditLogList';
+import RemoteChangeNotice from '../components/RemoteChangeNotice';
 import SaveNoticeView from '../components/SaveNoticeView';
 import StatusBadge from '../components/StatusBadge';
 import TimeCompare from '../components/TimeCompare';
-import { isoToKstInput, kstInputToIso } from '../lib/kst';
-import { scrollIntoViewOnNarrow } from '../lib/scroll';
+import { isoToKstInput, kstInputAfter, kstInputToIso, relativeToNow } from '../lib/kst';
+import { focusRow, scrollIntoViewOnNarrow } from '../lib/scroll';
+import { useNow } from '../lib/useNow';
+import { useServerDraft } from '../lib/useServerDraft';
 import {
   ACTION_REQUIRED,
-  STATUS_ORDER,
   activeCleaning,
   applyServerView,
-  byPriorityThenId,
+  byPriorityThenCleaning,
   checkoutText,
   cleaningText,
   isConflict,
@@ -25,11 +27,8 @@ import {
 
 type Filter = 'ACTION_REQUIRED' | 'ALL' | InspectionStatus;
 
-const FILTERS: { value: Filter; label: string }[] = [
-  { value: 'ACTION_REQUIRED', label: '조치 필요' },
-  { value: 'ALL', label: '전체' },
-  ...STATUS_ORDER.map((s) => ({ value: s, label: STATUS_LABEL[s] })),
-];
+const TITLE = '청소 일정 점검';
+const FLASH_MS = 2400;
 
 function matches(filter: Filter, r: ReservationView): boolean {
   const s = statusOf(r);
@@ -38,10 +37,75 @@ function matches(filter: Filter, r: ReservationView): boolean {
   return s === filter;
 }
 
+/** Screen-reader line for a judgment that just appeared or changed. */
+function announcement(r: ReservationView): string {
+  const s = statusOf(r);
+  if (!s) return '';
+  if (ACTION_REQUIRED.has(s)) return `${r.id} ${STATUS_LABEL[s]}`;
+  return `${r.id} ${STATUS_LABEL[s]}${s === 'EXCLUDED' ? '로' : '으로'} 변경`;
+}
+
+/**
+ * Rows that are new or whose judgment changed since the previous list (not on first load):
+ * `flash` maps id → a sequence number (alternating animation names restart the highlight) and
+ * `message` is the polite announcement for them.
+ */
+function useJudgmentChanges(all: ReservationView[] | undefined) {
+  const previous = useRef<Map<string, InspectionStatus | null> | null>(null);
+  const seq = useRef(0);
+  const timers = useRef<number[]>([]);
+  const [flash, setFlash] = useState<Record<string, number>>({});
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    if (!all) return;
+    const before = previous.current;
+    previous.current = new Map(all.map((r) => [r.id, statusOf(r)] as const));
+    if (!before) return;
+    const changed = [...all]
+      .sort(byPriorityThenCleaning)
+      .filter((r) => !before.has(r.id) || before.get(r.id) !== statusOf(r));
+    if (changed.length === 0) return;
+    const n = ++seq.current;
+    setFlash((f) => ({ ...f, ...Object.fromEntries(changed.map((r) => [r.id, n])) }));
+    setMessage(changed.map(announcement).filter(Boolean).join(', '));
+    timers.current.push(
+      window.setTimeout(() => {
+        setFlash((f) => {
+          const next = { ...f };
+          for (const r of changed) if (next[r.id] === n) delete next[r.id];
+          return next;
+        });
+      }, FLASH_MS),
+    );
+  }, [all]);
+
+  useEffect(() => {
+    const pending = timers.current;
+    return () => pending.forEach((t) => window.clearTimeout(t));
+  }, []);
+
+  return { flash, message };
+}
+
+function isTyping(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.isContentEditable ||
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement
+  );
+}
+
 export default function OperationsPage() {
   const q = useQuery({ queryKey: queryKeys.inspections(), queryFn: () => api.listInspections() });
   const [filter, setFilter] = useState<Filter>('ACTION_REQUIRED');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [focusRequest, setFocusRequest] = useState<{ target: 'row' | 'cleaning'; id: string; n: number } | null>(
+    null,
+  );
+  const now = useNow();
 
   const all = q.data;
   const counts = useMemo(() => {
@@ -59,13 +123,86 @@ export default function OperationsPage() {
     return c;
   }, [all]);
   const rows = useMemo(
-    () => (all ?? []).filter((r) => matches(filter, r)).sort(byPriorityThenId),
+    () => (all ?? []).filter((r) => matches(filter, r)).sort(byPriorityThenCleaning),
     [all, filter],
   );
   // Looked up in the full list so the panel stays open when the row leaves the filter.
   const selected = all?.find((r) => r.id === selectedId) ?? null;
+  const { flash, message } = useJudgmentChanges(all);
 
   const actionTotal = counts.CONFLICT + counts.NEEDS_CHECK + counts.UNDETERMINED;
+
+  useEffect(() => {
+    document.title = all && actionTotal > 0 ? `(${actionTotal}) ${TITLE}` : TITLE;
+  }, [all, actionTotal]);
+  useEffect(
+    () => () => {
+      document.title = TITLE;
+    },
+    [],
+  );
+
+  const focusSeq = useRef(0);
+  const requestFocus = (target: 'row' | 'cleaning', id: string) =>
+    setFocusRequest({ target, id, n: ++focusSeq.current });
+
+  useEffect(() => {
+    if (!focusRequest) return;
+    if (focusRequest.target === 'row') {
+      focusRow(`inspection-row-${focusRequest.id}`);
+      return;
+    }
+    const panel = document.querySelector<HTMLElement>('[data-testid="detail-panel"]');
+    const target =
+      panel?.querySelector<HTMLElement>('[data-testid="cleaning-input"]') ??
+      panel?.querySelector<HTMLElement>('[data-detail-heading]');
+    target?.focus();
+  }, [focusRequest]);
+
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const selectedRef = useRef(selectedId);
+  selectedRef.current = selectedId;
+
+  function move(delta: 1 | -1) {
+    const list = rowsRef.current;
+    if (list.length === 0) return;
+    const i = list.findIndex((r) => r.id === selectedRef.current);
+    const next = i === -1 ? (delta > 0 ? 0 : list.length - 1) : Math.min(list.length - 1, Math.max(0, i + delta));
+    const id = list[next].id;
+    setSelectedId(id);
+    requestFocus('row', id);
+  }
+
+  // j / k move the selection anywhere on the page except while typing.
+  const moveRef = useRef(move);
+  moveRef.current = move;
+  useEffect(() => {
+    function onKey(e: globalThis.KeyboardEvent) {
+      if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
+      if (e.key === 'j' || e.key === 'k') {
+        e.preventDefault();
+        moveRef.current(e.key === 'j' ? 1 : -1);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  function onListKey(e: KeyboardEvent<HTMLElement>) {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    if (!(e.target instanceof HTMLElement) || !e.target.classList.contains('row-select')) return;
+    e.preventDefault();
+    move(e.key === 'ArrowDown' ? 1 : -1);
+  }
+
+  function closeDetail() {
+    if (!selectedId) return;
+    const id = selectedId;
+    setSelectedId(null);
+    requestFocus('row', id);
+  }
+
   const summaryButton = (st: InspectionStatus) => (
     <button
       type="button"
@@ -85,8 +222,11 @@ export default function OperationsPage() {
   return (
     <main className="page">
       <div className="page-head">
-        <h1>청소 일정 점검</h1>
+        <h1>{TITLE}</h1>
       </div>
+      <p className="sr-only" role="status" aria-live="polite" data-testid="judgment-announcer">
+        {message}
+      </p>
 
       <div className="summary" role="group" aria-label="판정 요약">
         <div
@@ -114,21 +254,16 @@ export default function OperationsPage() {
       </div>
 
       <div className="toolbar">
-        <label className="toolbar-filter">
-          보기{' '}
-          <select
-            data-testid="status-filter"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value as Filter)}
-          >
-            {FILTERS.map((f) => (
-              <option key={f.value} value={f.value}>
-                {f.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        {all && <span className="muted tnum">{rows.length}건</span>}
+        <button
+          type="button"
+          className={`filter-all ${filter === 'ALL' ? 'active' : ''}`}
+          data-testid="summary-ALL"
+          aria-pressed={filter === 'ALL'}
+          onClick={() => setFilter('ALL')}
+        >
+          전체 <b className="tnum">{all?.length ?? 0}</b>
+        </button>
+        {all && <span className="muted tnum">{rows.length}건 표시</span>}
       </div>
 
       {q.isPending && <p className="muted state-line">점검 결과를 불러오는 중…</p>}
@@ -136,7 +271,7 @@ export default function OperationsPage() {
 
       {all && (
         <div className="split">
-          <div className="table-wrap card flush">
+          <div className="table-wrap card flush" onKeyDown={onListKey}>
             <table className="data-table table-inspections">
               <thead>
                 <tr>
@@ -159,28 +294,37 @@ export default function OperationsPage() {
                   </tr>
                 )}
                 {rows.map((r) => {
-                  const hasCleaningTime = !!activeCleaning(r)?.scheduledStartAt;
+                  const cleaningAt = activeCleaning(r)?.scheduledStartAt ?? null;
                   const status = statusOf(r);
                   const clash = status === 'CONFLICT';
+                  const flashSeq = flash[r.id];
                   return (
                     <tr
                       key={r.id}
                       data-testid={`inspection-row-${r.id}`}
-                      className={`clickable row-${status ?? 'UNKNOWN'} ${
-                        r.id === selectedId ? 'selected' : ''
-                      }`}
+                      className={[
+                        'clickable',
+                        `row-${status ?? 'UNKNOWN'}`,
+                        r.id === selectedId ? 'selected' : '',
+                        flashSeq ? `row-flash row-flash-${flashSeq % 2}` : '',
+                      ].join(' ')}
                       aria-current={r.id === selectedId ? 'true' : undefined}
-                      tabIndex={0}
                       onClick={() => setSelectedId(r.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          setSelectedId(r.id);
-                        }
-                      }}
                     >
                       <td className="cell-id" data-label="예약 번호">
-                        {r.id}
+                        <button
+                          type="button"
+                          className="row-select"
+                          aria-label={`${r.id} 상세 보기`}
+                          onKeyDown={(e) => {
+                            if (e.key !== 'Enter') return;
+                            e.preventDefault();
+                            setSelectedId(r.id);
+                            requestFocus('cleaning', r.id);
+                          }}
+                        >
+                          {r.id}
+                        </button>
                       </td>
                       <td data-label="객실">{r.roomId}</td>
                       <td
@@ -190,14 +334,15 @@ export default function OperationsPage() {
                         {checkoutText(r)}
                       </td>
                       <td
-                        className={
-                          hasCleaningTime
-                            ? `cell-time cell-cleaning ${clash ? 'clash' : ''}`
-                            : 'missing'
-                        }
+                        className={cleaningAt ? `cell-time cell-cleaning ${clash ? 'clash' : ''}` : 'missing'}
                         data-label="청소 시작 예정"
                       >
-                        {cleaningText(r)}
+                        <span className="time-main">{cleaningText(r)}</span>
+                        {cleaningAt && (
+                          <span className="time-rel" data-testid="cleaning-relative">
+                            {relativeToNow(cleaningAt, now)}
+                          </span>
+                        )}
                       </td>
                       <td className="cell-status" data-label="판정">
                         <StatusBadge status={status} />
@@ -213,7 +358,7 @@ export default function OperationsPage() {
           </div>
 
           {selected ? (
-            <DetailPanel key={selected.id} reservation={selected} />
+            <DetailPanel key={selected.id} reservation={selected} onClose={closeDetail} />
           ) : (
             <aside className="detail-placeholder">목록에서 예약을 선택하세요.</aside>
           )}
@@ -223,7 +368,7 @@ export default function OperationsPage() {
   );
 }
 
-function DetailPanel({ reservation }: { reservation: ReservationView }) {
+function DetailPanel({ reservation, onClose }: { reservation: ReservationView; onClose(): void }) {
   const status = statusOf(reservation);
   const task = activeCleaning(reservation);
   const editable = !!task && status !== 'EXCLUDED';
@@ -231,11 +376,17 @@ function DetailPanel({ reservation }: { reservation: ReservationView }) {
     <aside
       className="card detail detail-side"
       data-testid="detail-panel"
+      aria-labelledby="detail-heading"
       ref={scrollIntoViewOnNarrow}
     >
       <div className="detail-head">
-        <h2>{reservation.id}</h2>
+        <h2 id="detail-heading" tabIndex={-1} data-detail-heading>
+          {reservation.id}
+        </h2>
         <StatusBadge status={status} />
+        <button type="button" className="btn-small btn-ghost detail-close" onClick={onClose}>
+          목록으로
+        </button>
       </div>
       {reservation.inspection?.reasonText && (
         <p className={`detail-reason reason-${status ?? 'UNKNOWN'}`}>
@@ -281,9 +432,6 @@ function CleaningForm({
   task: NonNullable<ReservationView['cleaningTask']>;
 }) {
   const queryClient = useQueryClient();
-  const [input, setInput] = useState(() => isoToKstInput(task.scheduledStartAt));
-  // Optimistic lock: version of the task as it was when this form opened (see CheckoutEditor).
-  const [baseVersion, setBaseVersion] = useState(task.version);
   const [reason, setReason] = useState('');
   const [notice, setNotice] = useState<SaveNotice | null>(null);
   // The judgment returned by this save; shown only while it is still the latest judgment.
@@ -297,8 +445,20 @@ function CleaningForm({
     mutationFn: (body: { scheduledStartAt: string; reason?: string; version: number }) =>
       api.rescheduleCleaning(task.id, body),
   });
+  // Optimistic lock: the save sends draft.baseVersion, the version the input was based on.
+  const draft = useServerDraft(isoToKstInput(task.scheduledStartAt), task.version, mutation.isPending);
+  const { input } = draft;
 
   const canSave = !!input && !mutation.isPending;
+  const checkoutAt = reservation.checkoutAt;
+  const beforeCheckout = (() => {
+    if (!checkoutAt || !input) return false;
+    try {
+      return Date.parse(kstInputToIso(input)) < Date.parse(checkoutAt);
+    } catch {
+      return false;
+    }
+  })();
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -314,9 +474,12 @@ function CleaningForm({
     setRecheck(null);
     const memo = reason.trim();
     mutation.mutate(
-      { scheduledStartAt, ...(memo ? { reason: memo } : {}), version: baseVersion },
+      { scheduledStartAt, ...(memo ? { reason: memo } : {}), version: draft.baseVersion },
       {
         onSuccess: (saved) => {
+          if (saved.cleaningTask) {
+            draft.reset(isoToKstInput(saved.cleaningTask.scheduledStartAt), saved.cleaningTask.version);
+          }
           applyServerView(queryClient, saved);
           setRecheck(
             saved.inspection
@@ -324,10 +487,6 @@ function CleaningForm({
               : null,
           );
           setReason('');
-          if (saved.cleaningTask) {
-            setBaseVersion(saved.cleaningTask.version);
-            setInput(isoToKstInput(saved.cleaningTask.scheduledStartAt));
-          }
         },
         onError: (err) => {
           if (!isConflict(err)) {
@@ -338,8 +497,7 @@ function CleaningForm({
           void refreshAfterConflict(queryClient, err, reservation.id).then((latest) => {
             const latestTask = latest?.cleaningTask;
             if (!latestTask) return;
-            setInput(isoToKstInput(latestTask.scheduledStartAt));
-            setBaseVersion(latestTask.version);
+            draft.reset(isoToKstInput(latestTask.scheduledStartAt), latestTask.version);
           });
         },
       },
@@ -350,16 +508,44 @@ function CleaningForm({
     <form className="editor" onSubmit={onSubmit} aria-label={`${reservation.id} 청소 일정 수정`}>
       <h3>청소 일정 수정</h3>
       <div className="editor-fields">
-        <label className="field">
-          <span className="field-label">청소 시작</span>
+        <div className="field">
+          <label className="field-label" htmlFor="cleaning-input">
+            청소 시작
+          </label>
           <input
+            id="cleaning-input"
             type="datetime-local"
             data-testid="cleaning-input"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => draft.edit(e.target.value)}
+            aria-describedby="cleaning-checkout"
             required
           />
-        </label>
+          <div className="field-aside" id="cleaning-checkout">
+            <span>
+              체크아웃{' '}
+              <b className={checkoutAt ? 'tnum' : 'missing'} data-testid="cleaning-checkout">
+                {checkoutText(reservation)}
+              </b>
+            </span>
+            {checkoutAt && (
+              <button
+                type="button"
+                className="btn-small btn-ghost"
+                data-testid="cleaning-fill-30"
+                aria-label="체크아웃 +30분"
+                onClick={() => draft.edit(kstInputAfter(checkoutAt, 30))}
+              >
+                +30분
+              </button>
+            )}
+          </div>
+          {beforeCheckout && (
+            <p className="field-warn" data-testid="cleaning-before-checkout">
+              체크아웃보다 이른 시각입니다.
+            </p>
+          )}
+        </div>
         <label className="field grow">
           <span className="field-label">
             메모(사유) <span className="optional">선택</span>
@@ -373,6 +559,12 @@ function CleaningForm({
           />
         </label>
       </div>
+      {draft.remoteChanged && notice?.kind !== 'conflict' && (
+        <RemoteChangeNotice
+          latestAt={task.scheduledStartAt}
+          onReload={() => draft.reset(isoToKstInput(task.scheduledStartAt), task.version)}
+        />
+      )}
       <SaveNoticeView notice={notice} />
       <div className="editor-actions">
         <button type="submit" className="primary" data-testid="cleaning-save" disabled={!canSave}>

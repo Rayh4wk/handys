@@ -1,5 +1,5 @@
 import type { InspectionStatus } from '../api/types';
-import { formatKstTime } from '../lib/kst';
+import { formatKst, formatKstTime, sameKstDay } from '../lib/kst';
 
 const HOUR = 60 * 60 * 1000;
 
@@ -50,12 +50,14 @@ export default function TimeCompare({
   const edge = (p: number) => (p < 14 ? 'start' : p > 86 ? 'end' : 'mid');
   const cp = pct(c);
   const sp = pct(s);
+  // Across midnight the clock time alone is ambiguous, so both labels carry the date.
+  const label = sameKstDay(checkoutAt, cleaningAt) ? formatKstTime : formatKst;
 
   return (
     <figure className={`tc tc-${tone}`} aria-label="체크아웃과 청소 시작 시각 비교">
       <div className="tc-plot">
         <div className={`tc-label tc-label-top tc-${edge(cp)}`} style={{ left: `${cp}%` }}>
-          체크아웃 <b className="tnum">{formatKstTime(checkoutAt)}</b>
+          체크아웃 <b className="tnum">{label(checkoutAt)}</b>
         </div>
         <div className="tc-track">
           <div
@@ -66,7 +68,7 @@ export default function TimeCompare({
           <span className="tc-mark tc-mark-cleaning" style={{ left: `${sp}%` }} />
         </div>
         <div className={`tc-label tc-label-bottom tc-${edge(sp)}`} style={{ left: `${sp}%` }}>
-          청소 시작 <b className="tnum">{formatKstTime(cleaningAt)}</b>
+          청소 시작 <b className="tnum">{label(cleaningAt)}</b>
         </div>
         <div className="tc-axis" aria-hidden>
           {ticks.map((t) => (

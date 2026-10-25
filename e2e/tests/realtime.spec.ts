@@ -210,3 +210,32 @@ test('stale tab gets conflict notice', async ({ browser }) => {
 
   await context.close();
 });
+
+test('open ops form follows a remote change until edited', async ({ browser }) => {
+  const B = await openAs(browser, 'ops');
+  const C = await openAs(browser, 'ops'); // a second operations manager makes the changes
+
+  // R-104 stays in the default "조치 필요" list (checkout missing).
+  const before = await currentCleaning(B.page, 'R-104');
+  const input = B.page.getByTestId('detail-panel').getByTestId('cleaning-input');
+
+  // Untouched input: follows the other manager's change.
+  expect(await changeCleaning(C.page, 'R-104', addMinutes(before, 15), '원격 변경 1')).toBe(200);
+  await expect(input).toHaveValue(addMinutes(before, 15), { timeout: 2_000 });
+  await expect(B.page.getByTestId('remote-change-notice')).toHaveCount(0);
+
+  // Edited input: keeps the typed value and offers the latest one.
+  await input.fill(addMinutes(before, 45));
+  const latest = addMinutes(before, 30);
+  expect(await changeCleaning(C.page, 'R-104', latest, '원격 변경 2')).toBe(200);
+  const notice = B.page.getByTestId('remote-change-notice');
+  await expect(notice).toContainText(`다른 사용자가 ${latest.slice(11)}으로 변경했습니다.`, {
+    timeout: 2_000,
+  });
+  await expect(input).toHaveValue(addMinutes(before, 45));
+  await notice.getByTestId('remote-change-reload').click();
+  await expect(input).toHaveValue(latest);
+
+  await B.context.close();
+  await C.context.close();
+});

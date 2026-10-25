@@ -99,7 +99,7 @@ try {
   await B.page.goto(`${BASE}/operations?demo=1`);
   await B.page.reload();
   await waitForRealtime(B.page);
-  await B.page.getByTestId('status-filter').waitFor();
+  await B.page.getByTestId('summary-ALL').waitFor();
   await B.page.getByTestId('sse-toggle').click();
   await B.page.getByTestId('sse-warning').waitFor();
   await shoot(B.page, '09-operations-disconnected');

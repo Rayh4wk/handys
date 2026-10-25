@@ -62,6 +62,21 @@ export function byPriorityThenId(a: ReservationView, b: ReservationView): number
   return rank(a) - rank(b) || a.id.localeCompare(b.id);
 }
 
+const cleaningStart = (r: ReservationView): number => {
+  const at = activeCleaning(r)?.scheduledStartAt;
+  return at ? Date.parse(at) : Number.POSITIVE_INFINITY;
+};
+
+/** Status priority, then the earliest cleaning start (missing last), then id. */
+export function byPriorityThenCleaning(a: ReservationView, b: ReservationView): number {
+  const byRank = rank(a) - rank(b);
+  if (byRank) return byRank;
+  const ca = cleaningStart(a);
+  const cb = cleaningStart(b);
+  if (ca !== cb) return ca === Number.POSITIVE_INFINITY ? 1 : cb === Number.POSITIVE_INFINITY ? -1 : ca - cb;
+  return a.id.localeCompare(b.id);
+}
+
 export function byId(a: ReservationView, b: ReservationView): number {
   return a.id.localeCompare(b.id);
 }

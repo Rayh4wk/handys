@@ -48,16 +48,20 @@ describe('OperationsPage', () => {
     renderWithClient(<OperationsPage />);
     expect(screen.getByRole('heading', { name: '청소 일정 점검' })).toBeInTheDocument();
     await screen.findByTestId('inspection-row-R-101');
-    expect((screen.getByTestId('status-filter') as HTMLSelectElement).value).toBe('ACTION_REQUIRED');
+    expect(screen.getByTestId('summary-ACTION_REQUIRED')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('summary-ALL')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
     expect(rowIds()).toEqual(['R-101', 'R-103', 'R-104']);
     expect(screen.queryByTestId('inspection-row-R-102')).not.toBeInTheDocument();
     expect(screen.getByTestId('summary-CONFLICT')).toHaveTextContent('1');
     expect(screen.getByTestId('summary-NORMAL')).toHaveTextContent('1');
     expect(screen.getByTestId('summary-EXCLUDED')).toHaveTextContent('0');
 
-    fireEvent.change(screen.getByTestId('status-filter'), { target: { value: 'ALL' } });
+    fireEvent.click(screen.getByTestId('summary-ALL'));
+    expect(screen.getByTestId('summary-ALL')).toHaveTextContent('전체 4');
+    expect(screen.getByTestId('summary-ALL')).toHaveAttribute('aria-pressed', 'true');
     expect(rowIds()).toEqual(['R-101', 'R-103', 'R-104', 'R-102']);
-    fireEvent.change(screen.getByTestId('status-filter'), { target: { value: 'NORMAL' } });
+    fireEvent.click(screen.getByTestId('summary-NORMAL'));
     expect(rowIds()).toEqual(['R-102']);
   });
 
@@ -197,7 +201,7 @@ describe('OperationsPage', () => {
     const group = screen.getByRole('button', { name: /조치 필요/ });
     expect(group).toHaveAttribute('aria-pressed', 'false');
     await user.click(group);
-    expect((screen.getByTestId('status-filter') as HTMLSelectElement).value).toBe('ACTION_REQUIRED');
+    expect(screen.getByTestId('summary-NORMAL')).toHaveAttribute('aria-pressed', 'false');
     expect(group).toHaveAttribute('aria-pressed', 'true');
     expect(rowIds()).toEqual(['R-101', 'R-103', 'R-104']);
   });
@@ -235,32 +239,69 @@ describe('OperationsPage', () => {
     expect(screen.queryByTestId('recheck-result')).not.toBeInTheDocument();
   });
 
-  it('sends the cleaning version captured when the panel opened, even after a refetch', async () => {
+  // Another manager moves R-101's cleaning to 12:00 KST (version 2); the SSE refetch delivers it.
+  const movedByOther = () =>
+    fixture().map((r) =>
+      r.id === 'R-101'
+        ? makeReservation('R-101', {
+            status: 'CONFLICT',
+            checkoutAt: '2026-10-26T04:00:00.000Z',
+            cleaning: { scheduledStartAt: '2026-10-26T03:00:00.000Z', version: 2 },
+          })
+        : r,
+    );
+
+  it('follows a newer cleaning value (and its version) while the input is untouched', async () => {
     const user = userEvent.setup();
     const { queryClient } = renderWithClient(<OperationsPage />);
     await user.click(await screen.findByTestId('inspection-row-R-101'));
-    mocked.listInspections.mockResolvedValue(
-      fixture().map((r) =>
-        r.id === 'R-101'
-          ? makeReservation('R-101', {
-              status: 'CONFLICT',
-              checkoutAt: '2026-10-26T04:00:00.000Z',
-              cleaning: { scheduledStartAt: '2026-10-26T03:00:00.000Z', version: 2 },
-            })
-          : r,
-      ),
-    );
+    expect(screen.getByTestId('cleaning-input')).toHaveValue('2026-10-26T11:30');
+    mocked.listInspections.mockResolvedValue(movedByOther());
     await queryClient.invalidateQueries();
-    await waitFor(() =>
-      expect(screen.getByTestId('inspection-row-R-101')).toHaveTextContent('10/26 12:00'),
+    await waitFor(() => expect(screen.getByTestId('cleaning-input')).toHaveValue('2026-10-26T12:00'));
+    expect(screen.queryByTestId('remote-change-notice')).not.toBeInTheDocument();
+    mocked.rescheduleCleaning.mockResolvedValue(movedByOther()[2]);
+    await user.click(screen.getByTestId('cleaning-save'));
+    expect(mocked.rescheduleCleaning).toHaveBeenCalledWith('C-101', {
+      scheduledStartAt: '2026-10-26T03:00:00.000Z',
+      version: 2,
+    });
+  });
+
+  it('keeps a typed value and its old version after a remote change, with a notice', async () => {
+    const user = userEvent.setup();
+    const { queryClient } = renderWithClient(<OperationsPage />);
+    await user.click(await screen.findByTestId('inspection-row-R-101'));
+    fireEvent.change(screen.getByTestId('cleaning-input'), { target: { value: '2026-10-26T13:30' } });
+    mocked.listInspections.mockResolvedValue(movedByOther());
+    await queryClient.invalidateQueries();
+    expect(await screen.findByTestId('remote-change-notice')).toHaveTextContent(
+      '다른 사용자가 12:00으로 변경했습니다.',
     );
+    expect(screen.getByTestId('cleaning-input')).toHaveValue('2026-10-26T13:30');
+    // Saving anyway sends the version the typed value was based on → 409 from the server.
     mocked.rescheduleCleaning.mockRejectedValue(new ApiError(409, { message: 'VERSION_CONFLICT' }));
     await user.click(screen.getByTestId('cleaning-save'));
     expect(mocked.rescheduleCleaning).toHaveBeenCalledWith('C-101', {
-      scheduledStartAt: '2026-10-26T02:30:00.000Z',
+      scheduledStartAt: '2026-10-26T04:30:00.000Z',
       version: 1,
     });
     expect(await screen.findByTestId('conflict-notice')).toBeInTheDocument();
+  });
+
+  it('"최신 값 불러오기" adopts the remote value and version', async () => {
+    const user = userEvent.setup();
+    const { queryClient } = renderWithClient(<OperationsPage />);
+    await user.click(await screen.findByTestId('inspection-row-R-101'));
+    fireEvent.change(screen.getByTestId('cleaning-input'), { target: { value: '2026-10-26T13:30' } });
+    mocked.listInspections.mockResolvedValue(movedByOther());
+    await queryClient.invalidateQueries();
+    await user.click(await screen.findByTestId('remote-change-reload'));
+    expect(screen.getByTestId('cleaning-input')).toHaveValue('2026-10-26T12:00');
+    expect(screen.queryByTestId('remote-change-notice')).not.toBeInTheDocument();
+    mocked.rescheduleCleaning.mockResolvedValue(movedByOther()[2]);
+    await user.click(screen.getByTestId('cleaning-save'));
+    expect(mocked.rescheduleCleaning).toHaveBeenCalledWith('C-101', expect.objectContaining({ version: 2 }));
   });
 
   it('treats a 409 without current as a conflict: notice, refetch, reset to latest', async () => {
@@ -291,5 +332,130 @@ describe('OperationsPage', () => {
     mocked.rescheduleCleaning.mockClear();
     await user.click(screen.getByTestId('cleaning-save'));
     expect(mocked.rescheduleCleaning).toHaveBeenCalledWith('C-101', expect.objectContaining({ version: 2 }));
+  });
+});
+
+describe('OperationsPage live changes', () => {
+  it('highlights and announces rows whose judgment changed, not the first load', async () => {
+    const { queryClient } = renderWithClient(<OperationsPage />);
+    const r101 = await screen.findByTestId('inspection-row-R-101');
+    expect(r101.className).not.toMatch(/row-flash/);
+    expect(screen.getByTestId('judgment-announcer')).toBeEmptyDOMElement();
+
+    // R-104 gets its checkout (→ NORMAL) and a new conflicting reservation R-107 arrives.
+    mocked.listInspections.mockResolvedValue([
+      ...fixture().map((r) => (r.id === 'R-104' ? makeReservation('R-104', { status: 'NORMAL' }) : r)),
+      makeReservation('R-107', { status: 'CONFLICT' }),
+    ]);
+    await queryClient.invalidateQueries();
+    await waitFor(() => expect(screen.getByTestId('inspection-row-R-107').className).toMatch(/row-flash/));
+    expect(screen.getByTestId('inspection-row-R-101').className).not.toMatch(/row-flash/);
+    expect(screen.getByTestId('judgment-announcer')).toHaveTextContent(
+      'R-107 불일치, R-104 정상으로 변경',
+    );
+  });
+
+  it('puts the action-required count in the tab title', async () => {
+    const { queryClient, unmount } = renderWithClient(<OperationsPage />);
+    await screen.findByTestId('inspection-row-R-101');
+    expect(document.title).toBe('(3) 청소 일정 점검');
+    mocked.listInspections.mockResolvedValue(
+      fixture().map((r) => makeReservation(r.id, { status: 'NORMAL' })),
+    );
+    await queryClient.invalidateQueries();
+    await waitFor(() => expect(document.title).toBe('청소 일정 점검'));
+    unmount();
+    expect(document.title).toBe('청소 일정 점검');
+  });
+});
+
+describe('OperationsPage list efficiency', () => {
+  it('sorts each status group by cleaning start, missing last, then id', async () => {
+    mocked.listInspections.mockResolvedValue([
+      makeReservation('R-201', { status: 'CONFLICT', cleaning: { scheduledStartAt: '2026-10-26T03:00:00.000Z' } }),
+      makeReservation('R-202', { status: 'CONFLICT', cleaning: { scheduledStartAt: '2026-10-26T01:00:00.000Z' } }),
+      makeReservation('R-203', { status: 'UNDETERMINED', cleaning: { scheduledStartAt: null } }),
+      makeReservation('R-204', { status: 'UNDETERMINED', cleaning: { scheduledStartAt: '2026-10-26T05:00:00.000Z' } }),
+      makeReservation('R-200', { status: 'CONFLICT', cleaning: { scheduledStartAt: '2026-10-26T03:00:00.000Z' } }),
+      makeReservation('R-205', { status: 'NEEDS_CHECK', cleaning: null }),
+    ]);
+    renderWithClient(<OperationsPage />);
+    await screen.findByTestId('inspection-row-R-201');
+    expect(rowIds()).toEqual(['R-202', 'R-200', 'R-201', 'R-205', 'R-204', 'R-203']);
+  });
+
+  it('shows how far away each cleaning start is', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-26T00:00:00.000Z'));
+    mocked.listInspections.mockResolvedValue([
+      makeReservation('R-101', { status: 'CONFLICT', cleaning: { scheduledStartAt: '2026-10-26T02:30:00.000Z' } }),
+      makeReservation('R-102', { status: 'CONFLICT', cleaning: { scheduledStartAt: '2026-10-26T00:40:00.000Z' } }),
+      makeReservation('R-103', { status: 'CONFLICT', cleaning: { scheduledStartAt: '2026-10-25T23:00:00.000Z' } }),
+    ]);
+    try {
+      renderWithClient(<OperationsPage />);
+      const rel = async (id: string) =>
+        within(await screen.findByTestId(`inspection-row-${id}`)).getByTestId('cleaning-relative');
+      expect(await rel('R-101')).toHaveTextContent('2시간 후');
+      expect(await rel('R-102')).toHaveTextContent('40분 후');
+      expect(await rel('R-103')).toHaveTextContent('지남');
+    } finally {
+      vi.mocked(Date.now).mockRestore();
+    }
+  });
+
+  it('rows are buttons named by reservation; j/k and arrows move the selection', async () => {
+    const user = userEvent.setup();
+    renderWithClient(<OperationsPage />);
+    await screen.findByTestId('inspection-row-R-101');
+    const first = screen.getByRole('button', { name: 'R-101 상세 보기' });
+    await user.keyboard('j');
+    expect(screen.getByTestId('inspection-row-R-101')).toHaveAttribute('aria-current', 'true');
+    await waitFor(() => expect(first).toHaveFocus());
+    await user.keyboard('j');
+    expect(screen.getByTestId('inspection-row-R-103')).toHaveAttribute('aria-current', 'true');
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByTestId('inspection-row-R-104')).toHaveAttribute('aria-current', 'true');
+    await user.keyboard('k');
+    expect(screen.getByTestId('inspection-row-R-103')).toHaveAttribute('aria-current', 'true');
+    await user.keyboard('{ArrowUp}');
+    expect(screen.getByTestId('inspection-row-R-101')).toHaveAttribute('aria-current', 'true');
+    // typing in the form does not move the selection
+    await user.type(screen.getByTestId('cleaning-reason'), 'jk');
+    expect(screen.getByTestId('inspection-row-R-101')).toHaveAttribute('aria-current', 'true');
+  });
+
+  it('Enter on a row opens it and focuses the cleaning input', async () => {
+    const user = userEvent.setup();
+    renderWithClient(<OperationsPage />);
+    await screen.findByTestId('inspection-row-R-101');
+    screen.getByRole('button', { name: 'R-101 상세 보기' }).focus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByTestId('detail-panel')).toHaveTextContent('R-101');
+    await waitFor(() => expect(screen.getByTestId('cleaning-input')).toHaveFocus());
+  });
+
+  it('목록으로 closes the detail panel and returns focus to the row', async () => {
+    const user = userEvent.setup();
+    renderWithClient(<OperationsPage />);
+    await user.click(await screen.findByTestId('inspection-row-R-101'));
+    await user.click(screen.getByRole('button', { name: '목록으로' }));
+    expect(screen.queryByTestId('detail-panel')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'R-101 상세 보기' })).toHaveFocus());
+  });
+
+  it('shows the checkout next to the cleaning input, fills +30 min and warns when earlier', async () => {
+    const user = userEvent.setup();
+    renderWithClient(<OperationsPage />);
+    await user.click(await screen.findByTestId('inspection-row-R-101'));
+    const panel = screen.getByTestId('detail-panel');
+    expect(within(panel).getByTestId('cleaning-checkout')).toHaveTextContent('10/26 13:00');
+    // 11:30 is before the 13:00 checkout: warned, but saving stays possible
+    expect(within(panel).getByTestId('cleaning-before-checkout')).toHaveTextContent(
+      '체크아웃보다 이른 시각입니다.',
+    );
+    expect(within(panel).getByTestId('cleaning-save')).toBeEnabled();
+    await user.click(within(panel).getByRole('button', { name: '체크아웃 +30분' }));
+    expect(within(panel).getByTestId('cleaning-input')).toHaveValue('2026-10-26T13:30');
+    expect(within(panel).queryByTestId('cleaning-before-checkout')).not.toBeInTheDocument();
   });
 });
