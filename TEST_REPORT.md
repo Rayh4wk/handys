@@ -1,6 +1,6 @@
 # 시험 보고서
 
-- 실행 일시: 2026-10-25 21:55–22:02 KST, 커밋 `a073c00` 기준
+- 실행 일시: 2026-10-25 22:19–22:27 KST, 커밋 `b9b7314` 기준
 - 실행 구성: Node 22.20.0, PostgreSQL 15.13, Playwright 1.53.2 (Chromium)
 - 실행한 명령: `npm test`, `npm run test:int`, `npm run lint`, `npm run typecheck`, `npm run build`, `npm run e2e` (e2e는 2회 연속, 모두 exit 0)
 
