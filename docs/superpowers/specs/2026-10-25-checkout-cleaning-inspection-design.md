@@ -23,7 +23,7 @@
 - 각 reason code는 한국어 근거 문구로 매핑(예: `CLEANING_BEFORE_CHECKOUT` → "체크아웃 이전에 청소 시작 예정").
 
 ## 4. 구조
-- 저장소: `apps/server/`(NestJS + Prisma + Jest), `apps/web/`(Vite React TS + TanStack Query), `apps/e2e/`(Playwright), 루트 `package.json` 스크립트. 패키지 매니저 npm. **[내 결정]**
+- 저장소: `apps/server/`(NestJS + Prisma + Jest), `apps/web/`(Vite React TS + TanStack Query), `e2e/`(Playwright), 루트 `package.json` 스크립트. 패키지 매니저 npm. **[내 결정]**
 - API 경로는 `/api` 접두사 **[내 결정]**(정적 FE와 충돌 방지). Nest가 `apps/web/dist`를 `@nestjs/serve-static`으로 제공.
 - 실행: `docker-compose.yml`(app 1 + postgres 1). 로컬 실행은 로컬 PostgreSQL 사용.
 

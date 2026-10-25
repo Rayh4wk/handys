@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - **TypeScript 오류 0, ESLint 오류 0** (사용자 요구). 루트 `npm run typecheck`, `npm run lint`가 모든 앱(server src/test/prisma, web src, e2e)에서 통과해야 Task 완료. `any`, 미사용 변수, react-hooks 위반 금지.
-- 모노레포: 서비스별 폴더 `apps/server`, `apps/web`, 브라우저 테스트 `apps/e2e`. 루트 `package.json`이 npm workspaces(`apps/*`)로 묶고 의존성은 루트에서 `npm install` 한 번(루트 `package-lock.json` 하나). 앱별 스크립트는 `npm run <script> -w apps/<name>`.
+- 모노레포: 서비스별 폴더 `apps/server`, `apps/web`, 브라우저 테스트는 서비스가 아니므로 루트 `e2e/`. 루트 `package.json`이 npm workspaces(`apps/*`, `e2e`)로 묶고 의존성은 루트에서 `npm install` 한 번(루트 `package-lock.json` 하나). 앱별 스크립트는 `npm run <script> -w apps/<name>`.
 
 - 판정 상태 정확히 5개: `NORMAL`, `CONFLICT`, `NEEDS_CHECK`, `UNDETERMINED`, `EXCLUDED`. 표시명: 정상 / 불일치 / 확인 필요 / 판정 불가 / 점검 대상 제외.
 - Reason code 6개와 문구(고정 copy):
@@ -72,7 +72,7 @@ apps/web/
   src/components/Header.tsx, StatusBadge.tsx, AuditLogList.tsx
   src/pages/ReservationsPage.tsx, OperationsPage.tsx (+tests)
   src/styles.css
-apps/e2e/ package.json, playwright.config.ts, global-setup.ts, tests/*.spec.ts
+e2e/ package.json, playwright.config.ts, global-setup.ts, tests/*.spec.ts
 Dockerfile, docker-compose.yml, .dockerignore
 README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
 ```
@@ -308,16 +308,16 @@ README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
 ### Task 9: 정적 서빙 + Playwright e2e + Docker
 
 **Files:**
-- Create: `apps/e2e/package.json`, `apps/e2e/playwright.config.ts`, `apps/e2e/global-setup.ts`, `apps/e2e/helpers.ts`, `apps/e2e/tests/demo-flow.spec.ts`, `apps/e2e/tests/realtime.spec.ts`, `apps/e2e/tests/roles.spec.ts`, `Dockerfile`, `docker-compose.yml`, `.dockerignore`
+- Create: `e2e/package.json`, `e2e/playwright.config.ts`, `e2e/global-setup.ts`, `e2e/helpers.ts`, `e2e/tests/demo-flow.spec.ts`, `e2e/tests/realtime.spec.ts`, `e2e/tests/roles.spec.ts`, `Dockerfile`, `docker-compose.yml`, `.dockerignore`
 - Modify: `apps/server/src/app.module.ts`(ServeStaticModule: `rootPath` = `process.env.WEB_DIST ?? join(__dirname, '<to repo>/web/dist')`, `exclude: ['/api/(.*)']`, SPA fallback), 루트 `package.json`(`e2e`)
 
 **Interfaces:**
 - Consumes: Task 7 testid, Task 8 API.
-- Produces: `npm run e2e` — 루트 build 후 Playwright. global-setup이 `DATABASE_URL=…/handys_e2e`로 `prisma migrate reset --force`(시드 포함), `webServer`가 같은 DB로 `PORT=3100` 기동. `workers: 1`. `apps/e2e/helpers.ts`: `openAs(browser, 'agent'|'ops', opts?)` → 새 context(`timezoneId: 'America/New_York'`)에서 로그인 후 역할 홈 페이지 반환. 테스트 간 간섭 방지: demo-flow → R-101, 지연 측정 → R-106, SSE 끊김 → R-102 체크아웃, offline → R-102 청소, stale tab → R-104 청소. 각 테스트는 현재 값을 읽고 상대적으로 변경(재실행 가능) — 단 demo-flow는 global-setup 리셋 직후 시드 값 전제.
+- Produces: `npm run e2e` — 루트 build 후 Playwright. global-setup이 `DATABASE_URL=…/handys_e2e`로 `prisma migrate reset --force`(시드 포함), `webServer`가 같은 DB로 `PORT=3100` 기동. `workers: 1`. `e2e/helpers.ts`: `openAs(browser, 'agent'|'ops', opts?)` → 새 context(`timezoneId: 'America/New_York'`)에서 로그인 후 역할 홈 페이지 반환. 테스트 간 간섭 방지: demo-flow → R-101, 지연 측정 → R-106, SSE 끊김 → R-102 체크아웃, offline → R-102 청소, stale tab → R-104 청소. 각 테스트는 현재 값을 읽고 상대적으로 변경(재실행 가능) — 단 demo-flow는 global-setup 리셋 직후 시드 값 전제.
 
 - [ ] **Step 1: e2e** `demo-flow.spec.ts` — 예약 담당 브라우저 A(`/reservations`), 현장 운영 브라우저 B(`/operations`, 필터 "전체"): B에서 R-101 NORMAL → A에서 R-101 체크아웃 `2026-10-26T13:00`, 사유 "고객 요청" 저장 → A `change-result` "예약 변경 완료", "기존 청소 시작: 11:30", `data-result="CONFLICT"` → B의 R-101 `data-status="CONFLICT"` + "체크아웃 이전에 청소 시작 예정" 2초 내 → B에서 필터 "조치 필요"로 R-101 최상단 확인 → 행 클릭, 이력에 "고객 요청"·"예약 담당 김예약" → 청소 `2026-10-26T13:30` 저장 → `recheck-result` "정상", 청소 열 "10/26 13:30" → 이력 2건 → A의 R-101 배지 NORMAL, `change-result` `data-result="NORMAL"` 2초 내.
 - [ ] **Step 2: e2e** `realtime.spec.ts`:
-  - `measures cross-screen latency` — A PATCH 응답 시각과 B 배지 변화 시각 차 5회, 각 < 2000ms, `apps/e2e/latency.json`에 기록.
+  - `measures cross-screen latency` — A PATCH 응답 시각과 B 배지 변화 시각 차 5회, 각 < 2000ms, `e2e/latency.json`에 기록.
   - `recovers after SSE disconnect` — B `sse-toggle` → `data-state="disconnected"` → A 변경 → 2초 후 B는 이전 상태 유지 → 다시 연결 → 2초 내 최신 반영, `data-state="open"`.
   - `recovers after network offline` — B context `setOffline(true)` → A 변경 → `setOffline(false)` → 10초 내 최신 반영.
   - `stale tab gets conflict notice` — ops 탭 2개가 R-104 청소 수정: 탭2 `sse-toggle` 끊기 → 탭1 저장 → 탭2 저장 → `conflict-notice`.
@@ -332,7 +332,7 @@ README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
 - Create: `README.md`, `DESIGN.md`, `TEST_REPORT.md`, `AI_USAGE.md`
 
 **Interfaces:**
-- Consumes: GOAL.md, spec, plan, 실제 테스트 출력, `apps/e2e/latency.json`, git log, 리뷰 기록(컨트롤러가 전달).
+- Consumes: GOAL.md, spec, plan, 실제 테스트 출력, `e2e/latency.json`, git log, 리뷰 기록(컨트롤러가 전달).
 
 - [ ] **Step 1:** `npm test`, `npm run test:int`, `npm run e2e` 실행 후 출력 캡처.
 - [ ] **Step 2:** `README.md` — 문제 정의(핸디즈에 현재 문제가 있다고 주장하지 않음), 대상 사용자·역할(청소 담당자 제외 및 "실제 청소 담당자가 변경 내용을 전달받고 확인했는지는 검증 범위 밖"), 가정·판정 기준 표, 범위/제외, 데모 계정, 실행 방법(Docker Compose, 로컬), 시연 7단계(두 브라우저).
@@ -349,7 +349,7 @@ README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
 - Delete: `apps/server/package-lock.json`, `apps/web/package-lock.json` (루트 lockfile 하나로 대체), 앱별 node_modules
 
 **Interfaces:**
-- Produces: 루트에서 `npm install` → 루트 `package-lock.json` + hoisted `node_modules`. 루트 스크립트: `build`(web → server), `test`(server unit + web), `test:int`, `e2e`(apps/e2e 존재 시), `start`. 각 앱 패키지 이름: `@handys/server`, `@handys/web` (`"private": true`). 이후 Task의 명령은 `npm run <script> -w apps/server` 형식.
+- Produces: 루트에서 `npm install` → 루트 `package-lock.json` + hoisted `node_modules`. 루트 스크립트: `build`(web → server), `test`(server unit + web), `test:int`, `e2e`(e2e 존재 시), `start`. 각 앱 패키지 이름: `@handys/server`, `@handys/web` (`"private": true`). 이후 Task의 명령은 `npm run <script> -w apps/server` 형식.
 
 - [ ] **Step 1:** `git mv server apps/server`, `git mv web apps/web`; 앱별 lockfile·node_modules 삭제; 루트 workspaces 설정 후 루트에서 `npm install`.
 - [ ] **Step 2:** Prisma가 hoisted `@prisma/client`로 generate 되는지 확인(`npx prisma generate -w apps/server` 또는 apps/server 스크립트), 경로 의존 설정 수정.
@@ -378,7 +378,7 @@ README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
 
 **Files:**
 - Modify: `apps/web/src/styles.css`, `apps/web/src/**/*.tsx`(마크업·클래스, **data-testid와 고정 문구는 유지**), `apps/web/vite.config.ts`(proxy target을 `API_PORT` env로, 기본 3000), 루트 `package.json`(`setup`, `dev` 스크립트), `apps/server/package.json`(필요 시)
-- Create: `apps/e2e/tests/visual.spec.ts`(스크린샷 캡처 — 단언은 레이아웃 기본만: 가로 스크롤 없음, 주요 영역 visible), `docs/screenshots/*.png`
+- Create: `e2e/tests/visual.spec.ts`(스크린샷 캡처 — 단언은 레이아웃 기본만: 가로 스크롤 없음, 주요 영역 visible), `docs/screenshots/*.png`
 
 **Interfaces:**
 - Produces: 루트 `npm run setup` = dev DB(`handys`) `prisma migrate deploy` + 시드(재실행 가능하도록 시드 전 리셋 또는 upsert); 루트 `npm run dev` = 서버 watch(`PORT` env, 기본 3000) + Vite dev(5173, `/api` → `http://localhost:${API_PORT ?? 3000}`) 동시 실행(`concurrently` devDependency 허용). README(Task 10)가 이 명령을 인용.
