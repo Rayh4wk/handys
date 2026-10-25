@@ -1,4 +1,5 @@
 import { PrismaClient, CleaningType, ReservationStatus } from '@prisma/client';
+import { judge } from '../src/inspection/judge';
 
 const at = (hhmm: string) => new Date(`2026-10-26T${hhmm}:00+09:00`);
 
@@ -39,6 +40,19 @@ export async function seedDatabase(prisma: PrismaClient): Promise<void> {
         scheduledStartAt: at(r.task.start),
         status: 'SCHEDULED',
       },
+    });
+  }
+
+  const now = new Date();
+  for (const r of ROWS) {
+    const result = judge({
+      reservationStatus: r.status,
+      checkoutAt: r.checkout ? at(r.checkout) : null,
+      checkoutCleaning:
+        r.task.type === 'CHECKOUT' ? { status: 'SCHEDULED', scheduledStartAt: at(r.task.start) } : null,
+    });
+    await prisma.inspectionResult.create({
+      data: { reservationId: r.id, status: result.status, reasonCode: result.reasonCode, checkedAt: now },
     });
   }
 }
