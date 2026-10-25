@@ -12,6 +12,7 @@
 
 ## Global Constraints
 
+- **TypeScript 오류 0, ESLint 오류 0** (사용자 요구). 루트 `npm run typecheck`, `npm run lint`가 모든 앱(server src/test/prisma, web src, e2e)에서 통과해야 Task 완료. `any`, 미사용 변수, react-hooks 위반 금지.
 - 모노레포: 서비스별 폴더 `apps/server`, `apps/web`, 브라우저 테스트 `apps/e2e`. 루트 `package.json`이 npm workspaces(`apps/*`)로 묶고 의존성은 루트에서 `npm install` 한 번(루트 `package-lock.json` 하나). 앱별 스크립트는 `npm run <script> -w apps/<name>`.
 
 - 판정 상태 정확히 5개: `NORMAL`, `CONFLICT`, `NEEDS_CHECK`, `UNDETERMINED`, `EXCLUDED`. 표시명: 정상 / 불일치 / 확인 필요 / 판정 불가 / 점검 대상 제외.
@@ -85,7 +86,8 @@ README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
 | 2 | Task 3 (판정 함수), Task 4 (인증·권한), Task 5 (web 클라이언트·인증·실시간·헤더) | W1.5 |
 | 3 | Task 6 (점검 서비스+조회 API), Task 7 (web 역할별 화면) | W2 |
 | 4 | Task 8 (쓰기 경로+SSE) | W3 |
-| 5 | Task 9 (정적 서빙+Playwright+Docker) | W4 |
+| 4.5 | Task 12 (ESLint·typecheck 게이트) | W4 + Task 7 |
+| 5 | Task 9 (정적 서빙+Playwright+Docker) | W4.5 |
 | 6 | Task 10 (제출 문서) | W5 |
 
 ---
@@ -352,3 +354,19 @@ README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
 - [ ] **Step 2:** Prisma가 hoisted `@prisma/client`로 generate 되는지 확인(`npx prisma generate -w apps/server` 또는 apps/server 스크립트), 경로 의존 설정 수정.
 - [ ] **Step 3: 검증** — `npm test`(루트) PASS(server unit + web 6개), `npm run test:int -w apps/server` PASS, `npm run build`(루트) 성공, `git status`에 `server/`·`web/` 잔재 없음.
 - [ ] **Step 4: Commit** `refactor: restructure into apps/* npm workspaces monorepo`
+
+### Task 12: ESLint + typecheck 게이트
+
+**Files:**
+- Create: `eslint.config.mjs`(루트, flat config)
+- Modify: 루트 `package.json`(devDependencies + scripts `lint`, `typecheck`), `apps/server/package.json`·`apps/web/package.json`(`typecheck` 스크립트), 오류가 난 소스 파일(최소 수정), 필요 시 `apps/server/tsconfig.json`(test/, prisma/ 포함한 typecheck용 설정)
+
+**Interfaces:**
+- Produces: 루트 `npm run lint` = `eslint .` (오류 0, `--max-warnings 0`), 루트 `npm run typecheck` = 모든 workspace `typecheck`(server: `tsc --noEmit -p tsconfig.json`이 src·test·prisma 포함, web: `tsc --noEmit -p tsconfig.json`). 이후 Task(9, 10)와 최종 점검의 완료 조건.
+- 규칙: `@eslint/js` recommended + `typescript-eslint` recommended(type-aware 불필요) 전체, web에 `eslint-plugin-react-hooks` recommended + `eslint-plugin-react-refresh`(only-export-components warn → 0 warning 기준이므로 위반 시 수정), 테스트 파일은 globals(jest/vitest) 설정. ignore: `**/dist`, `**/node_modules`, `**/coverage`, `apps/server/prisma/migrations`, `.superpowers`.
+
+- [ ] **Step 1:** devDependencies 설치(루트): `eslint@^9`, `@eslint/js@^9`, `typescript-eslint@^8`, `globals`, `eslint-plugin-react-hooks@^5`, `eslint-plugin-react-refresh`.
+- [ ] **Step 2:** config 작성 후 `npm run lint`, `npm run typecheck` 실행 → 오류 목록 확보.
+- [ ] **Step 3:** 오류를 규칙 끄기가 아닌 코드 수정으로 해결(불가피한 경우만 라인 단위 disable + 이유 주석).
+- [ ] **Step 4: 검증** — `npm run lint`(0 problems), `npm run typecheck`(출력 없음), `npm test`, `npm run test:int` 모두 PASS, `npm run build` 성공.
+- [ ] **Step 5: Commit** `chore: add ESLint flat config and typecheck gate; fix violations`
