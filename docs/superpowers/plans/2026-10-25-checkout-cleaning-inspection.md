@@ -12,6 +12,8 @@
 
 ## Global Constraints
 
+- 모노레포: 서비스별 폴더 `apps/server`, `apps/web`, 브라우저 테스트 `apps/e2e`. 루트 `package.json`이 npm workspaces(`apps/*`)로 묶고 의존성은 루트에서 `npm install` 한 번(루트 `package-lock.json` 하나). 앱별 스크립트는 `npm run <script> -w apps/<name>`.
+
 - 판정 상태 정확히 5개: `NORMAL`, `CONFLICT`, `NEEDS_CHECK`, `UNDETERMINED`, `EXCLUDED`. 표시명: 정상 / 불일치 / 확인 필요 / 판정 불가 / 점검 대상 제외.
 - Reason code 6개와 문구(고정 copy):
   - `RESERVATION_CANCELLED` → "취소된 예약으로 점검 대상에서 제외"
@@ -47,7 +49,7 @@
 ```
 package.json                     루트 스크립트 (install:all, build, test, test:int, e2e, start)
 .env.example
-server/
+apps/server/
   package.json, tsconfig*.json, nest-cli.json, jest.config.js, jest.int.config.js
   prisma/schema.prisma, prisma/migrations/<ts>_init/migration.sql, prisma/seed.ts
   src/main.ts                     configureApp(app) export: /api prefix, ValidationPipe, cookie-parser
@@ -60,7 +62,7 @@ server/
   src/cleaning/cleaning.controller.ts
   src/events/events.service.ts, events.controller.ts, events.module.ts
   test/helpers.ts, test/*.int-spec.ts
-web/
+apps/web/
   vite.config.ts (proxy /api → :3000), index.html, src/main.tsx, App.tsx
   src/lib/kst.ts (+test)
   src/api/types.ts, client.ts
@@ -69,7 +71,7 @@ web/
   src/components/Header.tsx, StatusBadge.tsx, AuditLogList.tsx
   src/pages/ReservationsPage.tsx, OperationsPage.tsx (+tests)
   src/styles.css
-e2e/ package.json, playwright.config.ts, global-setup.ts, tests/*.spec.ts
+apps/e2e/ package.json, playwright.config.ts, global-setup.ts, tests/*.spec.ts
 Dockerfile, docker-compose.yml, .dockerignore
 README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
 ```
@@ -79,7 +81,8 @@ README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
 | Wave | Tasks (병렬) | 선행 |
 |---|---|---|
 | 1 | Task 1 (server 스캐폴드+DB), Task 2 (web 스캐폴드+kst) | 없음 |
-| 2 | Task 3 (판정 함수), Task 4 (인증·권한), Task 5 (web 클라이언트·인증·실시간·헤더) | W1 |
+| 1.5 | Task 11 (모노레포 재구성: apps/* + npm workspaces) | W1 |
+| 2 | Task 3 (판정 함수), Task 4 (인증·권한), Task 5 (web 클라이언트·인증·실시간·헤더) | W1.5 |
 | 3 | Task 6 (점검 서비스+조회 API), Task 7 (web 역할별 화면) | W2 |
 | 4 | Task 8 (쓰기 경로+SSE) | W3 |
 | 5 | Task 9 (정적 서빙+Playwright+Docker) | W4 |
@@ -90,19 +93,19 @@ README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
 ### Task 1: 서버 스캐폴드, Prisma 스키마, 시드
 
 **Files:**
-- Create: 루트 `package.json`, `.env.example`, `server/` 설정 파일(package.json, tsconfig, nest-cli, jest.config.js, jest.int.config.js), `server/prisma/schema.prisma`, `server/prisma/migrations/*_init/migration.sql`, `server/prisma/seed.ts`, `server/src/main.ts`, `server/src/app.module.ts`, `server/src/prisma/prisma.service.ts`, `server/src/prisma/prisma.module.ts`, `server/test/helpers.ts`, `server/test/schema.int-spec.ts`
+- Create: 루트 `package.json`, `.env.example`, `apps/server/` 설정 파일(package.json, tsconfig, nest-cli, jest.config.js, jest.int.config.js), `apps/server/prisma/schema.prisma`, `apps/server/prisma/migrations/*_init/migration.sql`, `apps/server/prisma/seed.ts`, `apps/server/src/main.ts`, `apps/server/src/app.module.ts`, `apps/server/src/prisma/prisma.service.ts`, `apps/server/src/prisma/prisma.module.ts`, `apps/server/test/helpers.ts`, `apps/server/test/schema.int-spec.ts`
 
 **Interfaces:**
 - Produces:
   - Prisma models: `Reservation{id, roomId, guestName, checkoutAt: Date|null, status: ReservationStatus, version Int @default(1), updatedAt}`, `CleaningTask{id, reservationId, type: CleaningType, scheduledStartAt: Date|null, status: CleaningStatus, version, updatedAt}`, `InspectionResult{reservationId @id, status: InspectionStatus, reasonCode: String, checkedAt}`, `AuditLog{id BigInt @id @default(autoincrement()), reservationId, action String, before Json, after Json, reason String?, actorId String, actorRole String, createdAt}`; enums `ReservationStatus{CONFIRMED,CANCELLED}`, `CleaningType{CHECKOUT,STAYOVER}`, `CleaningStatus{SCHEDULED,CANCELLED}`, `InspectionStatus{NORMAL,CONFLICT,NEEDS_CHECK,UNDETERMINED,EXCLUDED}`. 테이블 `@@map` `reservations`/`cleaning_tasks`/`inspection_results`/`audit_logs`, 컬럼 snake_case `@map`, 시각 `@db.Timestamptz(3)`. 관계 FK.
   - `PrismaService extends PrismaClient implements OnModuleInit` (global `PrismaModule`).
-  - `server/prisma/seed.ts`: `export async function seedDatabase(prisma: PrismaClient): Promise<void>` (예약·청소만; 판정 생성은 Task 6이 추가). 직접 실행 시 seedDatabase 호출. `package.json`의 `prisma.seed` 설정.
-  - `server/src/main.ts`: `export function configureApp(app: INestApplication): void` (`setGlobalPrefix('api')`, `ValidationPipe({whitelist:true, forbidNonWhitelisted:true, transform:true})`, `cookie-parser`, `enableShutdownHooks`). bootstrap은 `PORT` env(기본 3000).
-  - `server/test/helpers.ts`: `resetDb(prisma: PrismaClient): Promise<void>` (`TRUNCATE audit_logs, inspection_results, cleaning_tasks, reservations RESTART IDENTITY CASCADE` 후 `seedDatabase`), `createTestApp(override?: (b: TestingModuleBuilder) => TestingModuleBuilder): Promise<INestApplication>` (AppModule + configureApp + init).
+  - `apps/server/prisma/seed.ts`: `export async function seedDatabase(prisma: PrismaClient): Promise<void>` (예약·청소만; 판정 생성은 Task 6이 추가). 직접 실행 시 seedDatabase 호출. `package.json`의 `prisma.seed` 설정.
+  - `apps/server/src/main.ts`: `export function configureApp(app: INestApplication): void` (`setGlobalPrefix('api')`, `ValidationPipe({whitelist:true, forbidNonWhitelisted:true, transform:true})`, `cookie-parser`, `enableShutdownHooks`). bootstrap은 `PORT` env(기본 3000).
+  - `apps/server/test/helpers.ts`: `resetDb(prisma: PrismaClient): Promise<void>` (`TRUNCATE audit_logs, inspection_results, cleaning_tasks, reservations RESTART IDENTITY CASCADE` 후 `seedDatabase`), `createTestApp(override?: (b: TestingModuleBuilder) => TestingModuleBuilder): Promise<INestApplication>` (AppModule + configureApp + init).
   - server scripts: `build`, `start:dev`, `start:prod`, `test`(unit `src/**/*.spec.ts`), `test:int`(`DATABASE_URL`을 handys_test로 두고 `prisma migrate reset --force --skip-seed` 후 jest `test/**/*.int-spec.ts --runInBand`; env는 `dotenv -e .env.test` 또는 `TEST_DATABASE_URL` 기본값 사용), `db:migrate`(`prisma migrate deploy`), `db:seed`.
   - 루트 scripts: `install:all`(server, web, e2e npm install), `build`(web → server), `test`(server unit + web), `test:int`, `e2e`, `start`.
 
-- [ ] **Step 1:** Nest 10 프로젝트를 `server/`에 생성(git init 금지), Prisma 5, cookie-parser 설치, schema 작성. 시드(기준일 2026-10-26, `+09:00`):
+- [ ] **Step 1:** Nest 10 프로젝트를 `apps/server/`에 생성(git init 금지), Prisma 5, cookie-parser 설치, schema 작성. 시드(기준일 2026-10-26, `+09:00`):
   - R-101 room 301, 체크아웃 11:00, C-101 CHECKOUT 11:30
   - R-102 room 302, 13:00, C-102 CHECKOUT 13:30
   - R-103 room 303, 12:00, C-103 **STAYOVER** 14:00 (퇴실 청소 없음)
@@ -110,23 +113,23 @@ README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
   - R-105 room 305, CANCELLED, 11:00, C-105 CHECKOUT 12:00
   - R-106 room 306, 11:00, C-106 CHECKOUT 11:00
   - guestName 임의 가명.
-- [ ] **Step 2:** `prisma migrate dev --name init --create-only`로 생성 후 SQL 끝에 `CREATE UNIQUE INDEX "cleaning_tasks_one_checkout_per_reservation" ON "cleaning_tasks"("reservation_id") WHERE "type" = 'CHECKOUT';` 추가. `createdb handys handys_test handys_e2e`(이미 있으면 무시). `server/.env`(dev), `server/.env.test`(test) 로컬 생성(커밋 X), `.env.example` 커밋.
-- [ ] **Step 3: 실패 테스트** `server/test/schema.int-spec.ts`:
+- [ ] **Step 2:** `prisma migrate dev --name init --create-only`로 생성 후 SQL 끝에 `CREATE UNIQUE INDEX "cleaning_tasks_one_checkout_per_reservation" ON "cleaning_tasks"("reservation_id") WHERE "type" = 'CHECKOUT';` 추가. `createdb handys handys_test handys_e2e`(이미 있으면 무시). `apps/server/.env`(dev), `apps/server/.env.test`(test) 로컬 생성(커밋 X), `.env.example` 커밋.
+- [ ] **Step 3: 실패 테스트** `apps/server/test/schema.int-spec.ts`:
   - `seeds six reservations` — `resetDb` 후 count 6.
   - `rejects a second CHECKOUT task for the same reservation` — R-102 CHECKOUT 추가 → P2002 reject.
   - `allows a STAYOVER task next to a CHECKOUT task`.
   - `stores timestamptz` — R-101 `checkoutAt.toISOString() === '2026-10-26T02:00:00.000Z'`.
-- [ ] **Step 4:** `npm run test:int --prefix server` → PASS.
-- [ ] **Step 5:** `npm run build --prefix server` 성공, `start:prod` 기동 후 `curl -s localhost:3000/api/x` 가 404 JSON → 종료.
+- [ ] **Step 4:** `npm run test:int -w apps/server` → PASS.
+- [ ] **Step 5:** `npm run build -w apps/server` 성공, `start:prod` 기동 후 `curl -s localhost:3000/api/x` 가 404 JSON → 종료.
 - [ ] **Step 6: Commit** `feat(server): scaffold NestJS + Prisma schema and seed`
 
 ### Task 2: 웹 스캐폴드 + KST 변환 유틸
 
 **Files:**
-- Create: `web/**` (Vite react-ts 템플릿 기반, 불필요 데모 파일 제거), `web/src/lib/kst.ts`, `web/src/lib/kst.test.ts`
+- Create: `apps/web/**` (Vite react-ts 템플릿 기반, 불필요 데모 파일 제거), `apps/web/src/lib/kst.ts`, `apps/web/src/lib/kst.test.ts`
 
 **Interfaces:**
-- Produces (`web/src/lib/kst.ts`), 모두 브라우저 시간대와 무관:
+- Produces (`apps/web/src/lib/kst.ts`), 모두 브라우저 시간대와 무관:
   - `formatKst(iso: string | null): string` → `"10/26 13:00"` (`MM/DD HH:mm`), null → `""`.
   - `formatKstTime(iso: string | null): string` → `"13:00"`, null → `""`.
   - `formatKstDateTime(iso: string): string` → `"2026-10-26 13:00:05"`.
@@ -140,13 +143,13 @@ README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
   - `formatKst('2026-10-26T02:30:00.000Z') === '10/26 11:30'`, `formatKstTime('2026-10-26T02:30:00.000Z') === '11:30'`
   - `formatKst(null) === ''`, `kstInputToIso('garbage')` throws
   - 왕복 날짜 경계: `isoToKstInput(kstInputToIso('2026-10-26T00:15')) === '2026-10-26T00:15'`
-- [ ] **Step 2:** FAIL 확인 → 구현 → `npm test --prefix web` PASS, `npm run build --prefix web` 성공.
+- [ ] **Step 2:** FAIL 확인 → 구현 → `npm test -w apps/web` PASS, `npm run build -w apps/web` 성공.
 - [ ] **Step 3: Commit** `feat(web): scaffold Vite React app with KST time utils`
 
 ### Task 3: 판정 함수 (순수)
 
 **Files:**
-- Create: `server/src/inspection/judge.ts`, `server/src/inspection/judge.spec.ts`
+- Create: `apps/server/src/inspection/judge.ts`, `apps/server/src/inspection/judge.spec.ts`
 
 **Interfaces:**
 - Produces: `type InspectionStatusCode = 'NORMAL'|'CONFLICT'|'NEEDS_CHECK'|'UNDETERMINED'|'EXCLUDED'`; `type ReasonCode` (6개); `interface JudgeInput { reservationStatus: 'CONFIRMED'|'CANCELLED'; checkoutAt: Date|null; checkoutCleaning: { status: 'SCHEDULED'|'CANCELLED'; scheduledStartAt: Date|null } | null }`; `interface JudgeResult { status: InspectionStatusCode; reasonCode: ReasonCode }`; `judge(input: JudgeInput): JudgeResult` (spec §3 순서); `REASON_TEXT: Record<ReasonCode, string>`.
@@ -164,8 +167,8 @@ README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
 ### Task 4: 인증·권한 (서버)
 
 **Files:**
-- Create: `server/src/auth/accounts.ts`, `session.ts`, `auth.guard.ts`, `roles.decorator.ts`, `current-user.decorator.ts`, `auth.controller.ts`, `auth.module.ts`, `server/src/auth/session.spec.ts`, `server/test/auth.int-spec.ts`
-- Modify: `server/src/app.module.ts`(AuthModule import), `server/test/helpers.ts`(`loginAs` 추가)
+- Create: `apps/server/src/auth/accounts.ts`, `session.ts`, `auth.guard.ts`, `roles.decorator.ts`, `current-user.decorator.ts`, `auth.controller.ts`, `auth.module.ts`, `apps/server/src/auth/session.spec.ts`, `apps/server/test/auth.int-spec.ts`
+- Modify: `apps/server/src/app.module.ts`(AuthModule import), `apps/server/test/helpers.ts`(`loginAs` 추가)
 
 **Interfaces:**
 - Produces:
@@ -184,13 +187,13 @@ README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
   - 로그인 후 `GET /api/auth/me` → ops 계정; 쿠키 없이 → 401; 변조 쿠키 → 401.
   - logout 후 me → 401.
   - 역할 가드 검증용으로 테스트 내에서 `@Roles('OPERATIONS_MANAGER')` 붙인 테스트 전용 컨트롤러를 `Test.createTestingModule`에 추가하여 agent → 403, ops → 200 확인.
-- [ ] **Step 3:** 구현 → `npm test --prefix server`, `npm run test:int --prefix server` PASS.
+- [ ] **Step 3:** 구현 → `npm test -w apps/server`, `npm run test:int -w apps/server` PASS.
 - [ ] **Step 4: Commit** `feat(server): demo accounts, signed-cookie session and role guard`
 
 ### Task 5: 웹 API 클라이언트 + 인증 + 실시간 훅 + 헤더
 
 **Files:**
-- Create: `web/src/api/types.ts`, `web/src/api/client.ts`, `web/src/auth/AuthProvider.tsx`, `web/src/auth/LoginPage.tsx`, `web/src/auth/RequireRole.tsx`, `web/src/realtime/useRealtime.tsx`, `web/src/realtime/useRealtime.test.tsx`, `web/src/components/Header.tsx`, `web/src/components/StatusBadge.tsx`, `web/src/components/AuditLogList.tsx`, `web/src/App.tsx`(라우터 골격, 페이지는 placeholder `<h1>`), `web/src/main.tsx`, `web/src/styles.css`
+- Create: `apps/web/src/api/types.ts`, `apps/web/src/api/client.ts`, `apps/web/src/auth/AuthProvider.tsx`, `apps/web/src/auth/LoginPage.tsx`, `apps/web/src/auth/RequireRole.tsx`, `apps/web/src/realtime/useRealtime.tsx`, `apps/web/src/realtime/useRealtime.test.tsx`, `apps/web/src/components/Header.tsx`, `apps/web/src/components/StatusBadge.tsx`, `apps/web/src/components/AuditLogList.tsx`, `apps/web/src/App.tsx`(라우터 골격, 페이지는 placeholder `<h1>`), `apps/web/src/main.tsx`, `apps/web/src/styles.css`
 
 **Interfaces:**
 - Consumes: Task 2 kst; spec §7 API 계약.
@@ -211,14 +214,14 @@ README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
   - `invalidates reservation queries on reservation.updated` — `['audit-logs','R-101']` 포함
   - `ignores heartbeat`
   - `pause closes the EventSource and sets disconnected`; `resume opens a new one`
-- [ ] **Step 2:** FAIL → 구현 → `npm test --prefix web` PASS, build 성공.
+- [ ] **Step 2:** FAIL → 구현 → `npm test -w apps/web` PASS, build 성공.
 - [ ] **Step 3: Commit** `feat(web): API client, demo login, realtime SSE provider and header`
 
 ### Task 6: 점검 서비스 + 조회 API
 
 **Files:**
-- Create: `server/src/inspection/inspection.repository.ts`, `inspection.service.ts`, `inspection.controller.ts`, `inspection.module.ts`, `server/src/reservations/reservation-view.ts`, `reservations.service.ts`, `reservations.controller.ts`, `reservations.module.ts`, `server/test/read-api.int-spec.ts`
-- Modify: `server/src/app.module.ts`, `server/prisma/seed.ts`(끝에 전체 판정 생성)
+- Create: `apps/server/src/inspection/inspection.repository.ts`, `inspection.service.ts`, `inspection.controller.ts`, `inspection.module.ts`, `apps/server/src/reservations/reservation-view.ts`, `reservations.service.ts`, `reservations.controller.ts`, `reservations.module.ts`, `apps/server/test/read-api.int-spec.ts`
+- Modify: `apps/server/src/app.module.ts`, `apps/server/prisma/seed.ts`(끝에 전체 판정 생성)
 
 **Interfaces:**
 - Consumes: Task 3 `judge`, `REASON_TEXT`; Task 4 가드(조회는 로그인만 필요 — 별도 데코레이터 불필요), `loginAs`, `findAccountById`.
@@ -237,14 +240,14 @@ README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
   - `?status=NEEDS_CHECK` → `['R-103']`; `?status=BOGUS` → 400.
   - `POST /api/inspection-results/run` 3회 → `inspection_results` count 6 유지, 상태 동일, `checked === 6`.
   - audit-logs: `R-999` → 404, R-101 → `[]`.
-- [ ] **Step 2:** FAIL → 구현 → `npm run test:int --prefix server` PASS.
+- [ ] **Step 2:** FAIL → 구현 → `npm run test:int -w apps/server` PASS.
 - [ ] **Step 3: Commit** `feat(server): inspection recheck service and read APIs`
 
 ### Task 7: 웹 역할별 화면
 
 **Files:**
-- Create: `web/src/pages/ReservationsPage.tsx`, `web/src/pages/OperationsPage.tsx`, `web/src/pages/ReservationsPage.test.tsx`, `web/src/pages/OperationsPage.test.tsx`
-- Modify: `web/src/App.tsx`(라우트 연결: `/reservations` = `RequireRole role="RESERVATION_AGENT"`, `/operations` = `RequireRole role="OPERATIONS_MANAGER"`), `web/src/styles.css`
+- Create: `apps/web/src/pages/ReservationsPage.tsx`, `apps/web/src/pages/OperationsPage.tsx`, `apps/web/src/pages/ReservationsPage.test.tsx`, `apps/web/src/pages/OperationsPage.test.tsx`
+- Modify: `apps/web/src/App.tsx`(라우트 연결: `/reservations` = `RequireRole role="RESERVATION_AGENT"`, `/operations` = `RequireRole role="OPERATIONS_MANAGER"`), `apps/web/src/styles.css`
 
 **Interfaces:**
 - Consumes: Task 5 전부, Task 2 kst.
@@ -261,14 +264,14 @@ README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
 - [ ] **Step 1: 실패 테스트** (vitest, `api` mock):
   - `OperationsPage.test.tsx`: `defaults to action-required filter sorted CONFLICT first` (fixture: R-101 CONFLICT, R-102 NORMAL, R-103 NEEDS_CHECK, R-104 UNDETERMINED → 행 순서 R-101, R-103, R-104, R-102 미표시); `shows 작업 없음 for R-103 and 정보 누락 for R-104`; `shows conflict notice on 409 and refetches`.
   - `ReservationsPage.test.tsx`: `save disabled without reason`; `shows 청소 일정 조정 필요 result after CONFLICT response` (응답 fixture CONFLICT, 청소 11:30 → 패널에 "예약 변경 완료", "기존 청소 시작: 11:30", 안내 문구); `sends checkoutAt as UTC ISO and reason` (`changeCheckout` 호출 인자 `{checkoutAt:'2026-10-26T04:00:00.000Z', reason:'고객 요청', version:1}`).
-- [ ] **Step 2:** FAIL → 구현 → `npm test --prefix web` PASS, build 성공.
+- [ ] **Step 2:** FAIL → 구현 → `npm test -w apps/web` PASS, build 성공.
 - [ ] **Step 3: Commit** `feat(web): role-based reservations and operations screens`
 
 ### Task 8: 쓰기 경로(트랜잭션·잠금·버전·권한·이력) + SSE
 
 **Files:**
-- Create: `server/src/changes/change.service.ts`, `dto.ts`, `changes.module.ts`, `server/src/cleaning/cleaning.controller.ts`, `server/src/events/events.service.ts`, `events.controller.ts`, `events.module.ts`, `server/test/write-api.int-spec.ts`, `server/test/concurrency.int-spec.ts`, `server/test/events.int-spec.ts`
-- Modify: `server/src/reservations/reservations.controller.ts`(PATCH checkout), `server/src/app.module.ts`
+- Create: `apps/server/src/changes/change.service.ts`, `dto.ts`, `changes.module.ts`, `apps/server/src/cleaning/cleaning.controller.ts`, `apps/server/src/events/events.service.ts`, `events.controller.ts`, `events.module.ts`, `apps/server/test/write-api.int-spec.ts`, `apps/server/test/concurrency.int-spec.ts`, `apps/server/test/events.int-spec.ts`
+- Modify: `apps/server/src/reservations/reservations.controller.ts`(PATCH checkout), `apps/server/src/app.module.ts`
 
 **Interfaces:**
 - Consumes: `InspectionService.recheck`, `InspectionRepository`, `Tx`, `ReservationsService.getView`, Task 4 `Roles`, `CurrentUser`, `Account`, `loginAs`.
@@ -296,22 +299,22 @@ README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
   - `only one of two concurrent writers with same version wins` — 같은 version PATCH 2개 `Promise.all` → `[200, 409]`.
   - `concurrent checkout and cleaning edits leave inspection consistent with final values` — 20회: agent의 R-101 checkout 변경과 ops의 C-101 변경을 동시에(각 현재 version, 시각은 반복마다 다른 값으로 CONFLICT/NORMAL 교차) → 반복 후 DB 최종 값으로 `judge` 재계산 == 저장된 inspection.
 - [ ] **Step 3: 실패 테스트** `events.int-spec.ts`: `app.listen(0)`, ops 로그인 쿠키로 Node `fetch('/api/events')` 스트림 읽기 → agent PATCH 후 2초 내 `data: {"type":"reservation.updated","reservationId":"R-101","version":2}` 수신; 쿠키 없이 `/api/events` → 401.
-- [ ] **Step 4:** 구현 → `npm run test:int --prefix server`, `npm test --prefix server` 전부 PASS.
+- [ ] **Step 4:** 구현 → `npm run test:int -w apps/server`, `npm test -w apps/server` 전부 PASS.
 - [ ] **Step 5: Commit** `feat(server): transactional role-checked changes with locking, audit and SSE`
 
 ### Task 9: 정적 서빙 + Playwright e2e + Docker
 
 **Files:**
-- Create: `e2e/package.json`, `e2e/playwright.config.ts`, `e2e/global-setup.ts`, `e2e/helpers.ts`, `e2e/tests/demo-flow.spec.ts`, `e2e/tests/realtime.spec.ts`, `e2e/tests/roles.spec.ts`, `Dockerfile`, `docker-compose.yml`, `.dockerignore`
-- Modify: `server/src/app.module.ts`(ServeStaticModule: `rootPath` = `process.env.WEB_DIST ?? join(__dirname, '<to repo>/web/dist')`, `exclude: ['/api/(.*)']`, SPA fallback), 루트 `package.json`(`e2e`)
+- Create: `apps/e2e/package.json`, `apps/e2e/playwright.config.ts`, `apps/e2e/global-setup.ts`, `apps/e2e/helpers.ts`, `apps/e2e/tests/demo-flow.spec.ts`, `apps/e2e/tests/realtime.spec.ts`, `apps/e2e/tests/roles.spec.ts`, `Dockerfile`, `docker-compose.yml`, `.dockerignore`
+- Modify: `apps/server/src/app.module.ts`(ServeStaticModule: `rootPath` = `process.env.WEB_DIST ?? join(__dirname, '<to repo>/web/dist')`, `exclude: ['/api/(.*)']`, SPA fallback), 루트 `package.json`(`e2e`)
 
 **Interfaces:**
 - Consumes: Task 7 testid, Task 8 API.
-- Produces: `npm run e2e` — 루트 build 후 Playwright. global-setup이 `DATABASE_URL=…/handys_e2e`로 `prisma migrate reset --force`(시드 포함), `webServer`가 같은 DB로 `PORT=3100` 기동. `workers: 1`. `e2e/helpers.ts`: `openAs(browser, 'agent'|'ops', opts?)` → 새 context(`timezoneId: 'America/New_York'`)에서 로그인 후 역할 홈 페이지 반환. 테스트 간 간섭 방지: demo-flow → R-101, 지연 측정 → R-106, SSE 끊김 → R-102 체크아웃, offline → R-102 청소, stale tab → R-104 청소. 각 테스트는 현재 값을 읽고 상대적으로 변경(재실행 가능) — 단 demo-flow는 global-setup 리셋 직후 시드 값 전제.
+- Produces: `npm run e2e` — 루트 build 후 Playwright. global-setup이 `DATABASE_URL=…/handys_e2e`로 `prisma migrate reset --force`(시드 포함), `webServer`가 같은 DB로 `PORT=3100` 기동. `workers: 1`. `apps/e2e/helpers.ts`: `openAs(browser, 'agent'|'ops', opts?)` → 새 context(`timezoneId: 'America/New_York'`)에서 로그인 후 역할 홈 페이지 반환. 테스트 간 간섭 방지: demo-flow → R-101, 지연 측정 → R-106, SSE 끊김 → R-102 체크아웃, offline → R-102 청소, stale tab → R-104 청소. 각 테스트는 현재 값을 읽고 상대적으로 변경(재실행 가능) — 단 demo-flow는 global-setup 리셋 직후 시드 값 전제.
 
 - [ ] **Step 1: e2e** `demo-flow.spec.ts` — 예약 담당 브라우저 A(`/reservations`), 현장 운영 브라우저 B(`/operations`, 필터 "전체"): B에서 R-101 NORMAL → A에서 R-101 체크아웃 `2026-10-26T13:00`, 사유 "고객 요청" 저장 → A `change-result` "예약 변경 완료", "기존 청소 시작: 11:30", `data-result="CONFLICT"` → B의 R-101 `data-status="CONFLICT"` + "체크아웃 이전에 청소 시작 예정" 2초 내 → B에서 필터 "조치 필요"로 R-101 최상단 확인 → 행 클릭, 이력에 "고객 요청"·"예약 담당 김예약" → 청소 `2026-10-26T13:30` 저장 → `recheck-result` "정상", 청소 열 "10/26 13:30" → 이력 2건 → A의 R-101 배지 NORMAL, `change-result` `data-result="NORMAL"` 2초 내.
 - [ ] **Step 2: e2e** `realtime.spec.ts`:
-  - `measures cross-screen latency` — A PATCH 응답 시각과 B 배지 변화 시각 차 5회, 각 < 2000ms, `e2e/latency.json`에 기록.
+  - `measures cross-screen latency` — A PATCH 응답 시각과 B 배지 변화 시각 차 5회, 각 < 2000ms, `apps/e2e/latency.json`에 기록.
   - `recovers after SSE disconnect` — B `sse-toggle` → `data-state="disconnected"` → A 변경 → 2초 후 B는 이전 상태 유지 → 다시 연결 → 2초 내 최신 반영, `data-state="open"`.
   - `recovers after network offline` — B context `setOffline(true)` → A 변경 → `setOffline(false)` → 10초 내 최신 반영.
   - `stale tab gets conflict notice` — ops 탭 2개가 R-104 청소 수정: 탭2 `sse-toggle` 끊기 → 탭1 저장 → 탭2 저장 → `conflict-notice`.
@@ -326,7 +329,7 @@ README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
 - Create: `README.md`, `DESIGN.md`, `TEST_REPORT.md`, `AI_USAGE.md`
 
 **Interfaces:**
-- Consumes: GOAL.md, spec, plan, 실제 테스트 출력, `e2e/latency.json`, git log, 리뷰 기록(컨트롤러가 전달).
+- Consumes: GOAL.md, spec, plan, 실제 테스트 출력, `apps/e2e/latency.json`, git log, 리뷰 기록(컨트롤러가 전달).
 
 - [ ] **Step 1:** `npm test`, `npm run test:int`, `npm run e2e` 실행 후 출력 캡처.
 - [ ] **Step 2:** `README.md` — 문제 정의(핸디즈에 현재 문제가 있다고 주장하지 않음), 대상 사용자·역할(청소 담당자 제외 및 "실제 청소 담당자가 변경 내용을 전달받고 확인했는지는 검증 범위 밖"), 가정·판정 기준 표, 범위/제외, 데모 계정, 실행 방법(Docker Compose, 로컬), 시연 7단계(두 브라우저).
@@ -334,3 +337,18 @@ README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
 - [ ] **Step 4:** `TEST_REPORT.md` — GOAL §12 + 권한 항목: 시험 조건 / 예상 / 실제 / 근거 테스트명; 지연 실측값; 미해결 사항(실제 사실만).
 - [ ] **Step 5:** `AI_USAGE.md` — 이 세션에서 실제 수행한 요청·리뷰 발견·수정만(근거: git log, 리뷰 기록). 꾸며내지 않음.
 - [ ] **Step 6: Commit** `docs: README, DESIGN, TEST_REPORT, AI_USAGE`
+
+### Task 11: 모노레포 재구성 (apps/* + npm workspaces)
+
+**Files:**
+- Move: `server/` → `apps/server/`, `web/` → `apps/web/` (`git mv`, 이력 보존)
+- Modify: 루트 `package.json`(`"private": true`, `"workspaces": ["apps/*"]`, 스크립트를 `-w apps/<name>`로), 루트 `.gitignore`, 앱 안의 경로 의존 설정(jest/prisma/tsconfig/test helper/스크립트에 있는 상대 경로), `apps/server/.env.example`·`.env.example` 위치 정리
+- Delete: `apps/server/package-lock.json`, `apps/web/package-lock.json` (루트 lockfile 하나로 대체), 앱별 node_modules
+
+**Interfaces:**
+- Produces: 루트에서 `npm install` → 루트 `package-lock.json` + hoisted `node_modules`. 루트 스크립트: `build`(web → server), `test`(server unit + web), `test:int`, `e2e`(apps/e2e 존재 시), `start`. 각 앱 패키지 이름: `@handys/server`, `@handys/web` (`"private": true`). 이후 Task의 명령은 `npm run <script> -w apps/server` 형식.
+
+- [ ] **Step 1:** `git mv server apps/server`, `git mv web apps/web`; 앱별 lockfile·node_modules 삭제; 루트 workspaces 설정 후 루트에서 `npm install`.
+- [ ] **Step 2:** Prisma가 hoisted `@prisma/client`로 generate 되는지 확인(`npx prisma generate -w apps/server` 또는 apps/server 스크립트), 경로 의존 설정 수정.
+- [ ] **Step 3: 검증** — `npm test`(루트) PASS(server unit + web 6개), `npm run test:int -w apps/server` PASS, `npm run build`(루트) 성공, `git status`에 `server/`·`web/` 잔재 없음.
+- [ ] **Step 4: Commit** `refactor: restructure into apps/* npm workspaces monorepo`
