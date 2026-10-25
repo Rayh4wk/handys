@@ -1,0 +1,88 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ReservationStatus {
+  CONFIRMED
+  CANCELLED
+}
+
+enum CleaningType {
+  CHECKOUT
+  STAYOVER
+}
+
+enum CleaningStatus {
+  SCHEDULED
+  CANCELLED
+}
+
+enum InspectionStatus {
+  NORMAL
+  CONFLICT
+  NEEDS_CHECK
+  UNDETERMINED
+  EXCLUDED
+}
+
+model Reservation {
+  id         String            @id
+  roomId     String            @map("room_id")
+  guestName  String            @map("guest_name")
+  checkoutAt DateTime?         @map("checkout_at") @db.Timestamptz(3)
+  status     ReservationStatus
+  version    Int               @default(1)
+  updatedAt  DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  cleaningTasks    CleaningTask[]
+  inspectionResult InspectionResult?
+  auditLogs        AuditLog[]
+
+  @@map("reservations")
+}
+
+model CleaningTask {
+  id               String         @id
+  reservationId    String         @map("reservation_id")
+  type             CleaningType
+  scheduledStartAt DateTime?      @map("scheduled_start_at") @db.Timestamptz(3)
+  status           CleaningStatus
+  version          Int            @default(1)
+  updatedAt        DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  reservation Reservation @relation(fields: [reservationId], references: [id])
+
+  @@map("cleaning_tasks")
+}
+
+model InspectionResult {
+  reservationId String           @id @map("reservation_id")
+  status        InspectionStatus
+  reasonCode    String           @map("reason_code")
+  checkedAt     DateTime         @map("checked_at") @db.Timestamptz(3)
+
+  reservation Reservation @relation(fields: [reservationId], references: [id])
+
+  @@map("inspection_results")
+}
+
+model AuditLog {
+  id            BigInt   @id @default(autoincrement())
+  reservationId String   @map("reservation_id")
+  action        String
+  before        Json
+  after         Json
+  reason        String?
+  actorId       String   @map("actor_id")
+  actorRole     String   @map("actor_role")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  reservation Reservation @relation(fields: [reservationId], references: [id])
+
+  @@map("audit_logs")
+}
