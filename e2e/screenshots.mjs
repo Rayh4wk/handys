@@ -36,15 +36,18 @@ async function shoot(page, name) {
   await page.setViewportSize(WIDTHS.desktop);
 }
 
-async function login(role, { demo = false } = {}) {
+async function waitForRealtime(page) {
+  await page.getByTestId('sse-state').and(page.locator('[data-state="open"]')).waitFor();
+}
+
+async function login(role) {
   const context = await browser.newContext({ viewport: WIDTHS.desktop, locale: 'ko-KR' });
   const page = await context.newPage();
-  // ?demo=1 shows the demo-only disconnect toggle (needed for the last step only).
-  await page.goto(`${BASE}/login${demo ? '?demo=1' : ''}`);
+  await page.goto(`${BASE}/login`);
   await page.getByTestId('login-username').fill(role);
   await page.getByTestId('login-password').fill('demo1234');
   await page.getByTestId('login-submit').click();
-  await page.getByTestId('sse-state').and(page.locator('[data-state="open"]')).waitFor();
+  await waitForRealtime(page);
   return { context, page };
 }
 
@@ -73,7 +76,7 @@ try {
   await A.page.locator('[data-testid="change-result"][data-result="CONFLICT"]').waitFor();
   await shoot(A.page, '04-reservations-conflict');
 
-  const B = await login('ops', { demo: true });
+  const B = await login('ops');
   await B.page.getByTestId('inspection-row-R-101').waitFor();
   await shoot(B.page, '05-operations-action-required');
 
@@ -92,6 +95,11 @@ try {
   await A.page.locator('[data-testid="change-result"][data-result="NORMAL"]').waitFor();
   await shoot(A.page, '08-reservations-normal');
 
+  // Only the last shot needs the disconnect toggle, which appears with ?demo=1.
+  await B.page.goto(`${BASE}/operations?demo=1`);
+  await B.page.reload();
+  await waitForRealtime(B.page);
+  await B.page.getByTestId('status-filter').waitFor();
   await B.page.getByTestId('sse-toggle').click();
   await B.page.getByTestId('sse-warning').waitFor();
   await shoot(B.page, '09-operations-disconnected');

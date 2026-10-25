@@ -84,7 +84,7 @@ describe('concurrency', () => {
         ops.post('/api/inspection-results/run'),
         agent.patch('/api/reservations/R-101/checkout').send({ checkoutAt: checkout, reason: `run ${i}`, version: r.version }),
       ]);
-      expect([run.status, change.status]).toEqual([201, 200]);
+      expect([run.status, change.status]).toEqual([200, 200]);
 
       const fr = await prisma.reservation.findUniqueOrThrow({ where: { id: 'R-101' } });
       const ft = await prisma.cleaningTask.findUniqueOrThrow({ where: { id: 'C-101' } });
@@ -112,7 +112,7 @@ describe('concurrency', () => {
       await new Promise((r) => setTimeout(r, 150));
       const run = ops.post('/api/inspection-results/run').then((r) => r);
       const [c, rr] = await Promise.all([change, run]);
-      expect([c.status, rr.status]).toEqual([200, 201]);
+      expect([c.status, rr.status]).toEqual([200, 200]);
       const stored = await prisma.inspectionResult.findUniqueOrThrow({ where: { reservationId: 'R-101' } });
       expect(stored.status).toBe('CONFLICT');
     } finally {

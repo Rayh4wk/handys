@@ -57,10 +57,12 @@ describe('read api', () => {
     await a.get('/api/inspection-results?status=BOGUS').expect(400);
   });
 
-  it('run is idempotent', async () => {
-    const a = await loginAs(app, 'agent');
+  it('run is ops-only and idempotent', async () => {
+    const agent = await loginAs(app, 'agent');
+    await agent.post('/api/inspection-results/run').expect(403);
+    const a = await loginAs(app, 'ops');
     for (let i = 0; i < 3; i++) {
-      const res = await a.post('/api/inspection-results/run').expect(201);
+      const res = await a.post('/api/inspection-results/run').expect(200);
       expect(res.body).toEqual({ checked: 6 });
     }
     expect(await prisma.inspectionResult.count()).toBe(6);

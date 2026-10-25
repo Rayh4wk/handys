@@ -94,9 +94,15 @@ export default function OperationsPage() {
             filter === 'ACTION_REQUIRED' ? 'active' : ''
           }`}
         >
-          <span className="summary-group-label">
+          <button
+            type="button"
+            className="summary-group-label"
+            data-testid="summary-ACTION_REQUIRED"
+            aria-pressed={filter === 'ACTION_REQUIRED'}
+            onClick={() => setFilter('ACTION_REQUIRED')}
+          >
             조치 필요 <b className="tnum">{actionTotal}</b>
-          </span>
+          </button>
           <div className="summary-items">
             {(['CONFLICT', 'NEEDS_CHECK', 'UNDETERMINED'] as const).map(summaryButton)}
           </div>
@@ -153,7 +159,7 @@ export default function OperationsPage() {
                   </tr>
                 )}
                 {rows.map((r) => {
-                  const cleaning = cleaningText(r);
+                  const hasCleaningTime = !!activeCleaning(r)?.scheduledStartAt;
                   const status = statusOf(r);
                   const clash = status === 'CONFLICT';
                   return (
@@ -163,7 +169,7 @@ export default function OperationsPage() {
                       className={`clickable row-${status ?? 'UNKNOWN'} ${
                         r.id === selectedId ? 'selected' : ''
                       }`}
-                      aria-selected={r.id === selectedId}
+                      aria-current={r.id === selectedId ? 'true' : undefined}
                       tabIndex={0}
                       onClick={() => setSelectedId(r.id)}
                       onKeyDown={(e) => {
@@ -185,13 +191,13 @@ export default function OperationsPage() {
                       </td>
                       <td
                         className={
-                          /^\d/.test(cleaning)
+                          hasCleaningTime
                             ? `cell-time cell-cleaning ${clash ? 'clash' : ''}`
                             : 'missing'
                         }
                         data-label="청소 시작 예정"
                       >
-                        {cleaning}
+                        {cleaningText(r)}
                       </td>
                       <td className="cell-status" data-label="판정">
                         <StatusBadge status={status} />
@@ -280,7 +286,12 @@ function CleaningForm({
   const [baseVersion, setBaseVersion] = useState(task.version);
   const [reason, setReason] = useState('');
   const [notice, setNotice] = useState<SaveNotice | null>(null);
-  const [recheck, setRecheck] = useState<InspectionStatus | null>(null);
+  // The judgment returned by this save; shown only while it is still the latest judgment.
+  const [recheck, setRecheck] = useState<{ status: InspectionStatus; checkedAt: string } | null>(
+    null,
+  );
+  const recheckStatus =
+    recheck && reservation.inspection?.checkedAt === recheck.checkedAt ? recheck.status : null;
 
   const mutation = useMutation({
     mutationFn: (body: { scheduledStartAt: string; reason?: string; version: number }) =>
@@ -307,7 +318,11 @@ function CleaningForm({
       {
         onSuccess: (saved) => {
           applyServerView(queryClient, saved);
-          setRecheck(statusOf(saved));
+          setRecheck(
+            saved.inspection
+              ? { status: saved.inspection.status, checkedAt: saved.inspection.checkedAt }
+              : null,
+          );
           setReason('');
           if (saved.cleaningTask) {
             setBaseVersion(saved.cleaningTask.version);
@@ -352,6 +367,7 @@ function CleaningForm({
           <input
             type="text"
             data-testid="cleaning-reason"
+            maxLength={200}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
           />
@@ -362,9 +378,13 @@ function CleaningForm({
         <button type="submit" className="primary" data-testid="cleaning-save" disabled={!canSave}>
           {mutation.isPending ? '저장 중…' : '저장'}
         </button>
-        {recheck && (
-          <span className={`recheck recheck-${recheck}`} data-testid="recheck-result" role="status">
-            재점검 결과: {STATUS_LABEL[recheck]}
+        {recheckStatus && (
+          <span
+            className={`recheck recheck-${recheckStatus}`}
+            data-testid="recheck-result"
+            role="status"
+          >
+            재점검 결과: {STATUS_LABEL[recheckStatus]}
           </span>
         )}
       </div>

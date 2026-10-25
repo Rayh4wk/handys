@@ -82,6 +82,9 @@ export class ChangeService {
       if (r.status === 'CANCELLED') throw new UnprocessableEntityException({ message: 'RESERVATION_CANCELLED' });
       // Re-read under the reservation lock: every writer of this task holds the same lock.
       const t = await tx.cleaningTask.findUniqueOrThrow({ where: { id: taskId } });
+      if (t.status === 'CANCELLED') {
+        throw new UnprocessableEntityException({ message: 'CLEANING_TASK_CANCELLED' });
+      }
       if (t.version !== dto.version) await this.conflict(tx, reservationId);
 
       const scheduledStartAt = new Date(dto.scheduledStartAt);

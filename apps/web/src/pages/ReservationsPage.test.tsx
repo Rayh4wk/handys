@@ -71,7 +71,8 @@ describe('ReservationsPage', () => {
     const panel = screen.getByRole('region', { name: '선택한 예약' });
     expect(panel).toHaveTextContent('R-105');
     expect(panel).toHaveTextContent('취소된 예약은 변경할 수 없습니다.');
-    expect(r105).toHaveAttribute('aria-selected', 'true');
+    expect(r105).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByTestId('reservation-row-R-101')).not.toHaveAttribute('aria-current');
   });
 
   it('save disabled without reason', async () => {
@@ -170,7 +171,38 @@ describe('ReservationsPage', () => {
     const { user, editor } = await openEditor();
     await user.type(within(editor).getByTestId('checkout-reason'), '고객 요청');
     await user.click(within(editor).getByTestId('checkout-save'));
-    expect(await screen.findByTestId('error-notice')).toHaveTextContent('checkoutAt must be ISO');
+    const notice = await screen.findByTestId('error-notice');
+    expect(notice).toHaveTextContent('저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+    expect(notice).not.toHaveTextContent('checkoutAt');
+  });
+
+  it('caps the reason at 200 characters', async () => {
+    const { editor } = await openEditor();
+    expect(within(editor).getByTestId('checkout-reason')).toHaveAttribute('maxLength', '200');
+  });
+
+  it('keeps the cleaning start from save time and shows the current one when it changes', async () => {
+    mocked.changeCheckout.mockResolvedValue(conflictResponse);
+    const { user, editor } = await openEditor();
+    fireEvent.change(within(editor).getByTestId('checkout-input'), {
+      target: { value: '2026-10-26T13:00' },
+    });
+    await user.type(within(editor).getByTestId('checkout-reason'), '고객 요청');
+    // ops later moves the cleaning to 13:30 KST; the refetch delivers it
+    const fixedLater = makeReservation('R-101', {
+      checkoutAt: '2026-10-26T04:00:00.000Z',
+      cleaning: { scheduledStartAt: '2026-10-26T04:30:00.000Z', version: 2 },
+      status: 'NORMAL',
+      version: 2,
+    });
+    mocked.listReservations.mockResolvedValue(
+      fixture().map((r) => (r.id === 'R-101' ? fixedLater : r)),
+    );
+    await user.click(within(editor).getByTestId('checkout-save'));
+    const panel = await screen.findByTestId('change-result');
+    await waitFor(() => expect(panel).toHaveAttribute('data-result', 'NORMAL'));
+    expect(panel).toHaveTextContent('기존 청소 시작: 11:30');
+    expect(within(panel).getByTestId('current-cleaning')).toHaveTextContent('현재 청소 시작: 13:30');
   });
 
   it('sends the version captured when the editor opened, even after a refetch', async () => {

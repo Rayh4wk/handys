@@ -34,6 +34,8 @@ interface ChangeResult {
   reservationId: string;
   previousCheckoutAt: string | null;
   newCheckoutAt: string | null;
+  /** "HH:mm" (or 작업 없음/정보 누락) of the cleaning start as it was when the change was saved. */
+  cleaningAtSave: string;
   /** Fallbacks used until the list reflects the saved reservation. */
   saved: ReservationView;
 }
@@ -95,7 +97,7 @@ export default function ReservationsPage() {
                         r.id === selectedId ? 'selected' : '',
                         cancelled ? 'row-cancelled' : '',
                       ].join(' ')}
-                      aria-selected={r.id === selectedId}
+                      aria-current={r.id === selectedId ? 'true' : undefined}
                       tabIndex={0}
                       onClick={() => select(r.id)}
                       onKeyDown={(e) => {
@@ -252,6 +254,7 @@ function CheckoutEditor({
             reservationId: saved.id,
             previousCheckoutAt,
             newCheckoutAt: saved.checkoutAt,
+            cleaningAtSave: cleaningTimeText(saved),
             saved,
           });
         },
@@ -294,6 +297,7 @@ function CheckoutEditor({
           <input
             type="text"
             data-testid="checkout-reason"
+            maxLength={200}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             required
@@ -317,6 +321,7 @@ function ChangeResultPanel({ result, current }: { result: ChangeResult; current:
   // The judgment follows the latest data (SSE refetch), so an operations fix shows up here.
   const status = statusOf(current) ?? statusOf(result.saved);
   const conflict = status === 'CONFLICT';
+  const cleaningNow = cleaningTimeText(current);
   return (
     <section
       className={`result-panel ${status ? `result-${status}` : ''}`}
@@ -333,7 +338,10 @@ function ChangeResultPanel({ result, current }: { result: ChangeResult; current:
           체크아웃: <span className="was">{timeOrMissing(result.previousCheckoutAt)}</span> →{' '}
           <span className="now">{timeOrMissing(result.newCheckoutAt)}</span>
         </li>
-        <li>기존 청소 시작: {cleaningTimeText(current)}</li>
+        <li>기존 청소 시작: {result.cleaningAtSave}</li>
+        {cleaningNow !== result.cleaningAtSave && (
+          <li data-testid="current-cleaning">현재 청소 시작: {cleaningNow}</li>
+        )}
       </ul>
       <div className="result-judgment">
         <div className="result-judgment-head">

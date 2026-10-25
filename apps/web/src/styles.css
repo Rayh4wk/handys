@@ -325,6 +325,8 @@ tr:focus-visible { outline-offset: -2px; }
 .summary-group-label { font-size: 13px; font-weight: 650; color: var(--ink-2); display: flex; gap: 6px; align-items: baseline; }
 .summary-group-label b { font-size: 13px; }
 .summary-group-rest .summary-group-label { color: var(--muted); }
+button.summary-group-label { align-self: flex-start; padding: 0; min-height: 0; border: 0; border-radius: var(--r-sm); background: transparent; font: inherit; font-size: 13px; font-weight: 650; color: var(--ink-2); cursor: pointer; }
+button.summary-group-label:hover:not(:disabled) { background: transparent; color: var(--accent); }
 .summary-items { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 0; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); overflow: hidden; box-shadow: var(--shadow); }
 .summary-item { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 14px 16px; border: 0; border-radius: 0; border-left: 1px solid var(--line); background: transparent; text-align: left; min-width: 0; }
 .summary-item:first-child { border-left: 0; }

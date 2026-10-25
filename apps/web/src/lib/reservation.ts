@@ -82,17 +82,25 @@ export function conflictCurrent(err: unknown): ReservationView | null {
   return null;
 }
 
+export const SAVE_FAILED = '저장에 실패했습니다. 잠시 후 다시 시도해 주세요.';
+
 const ERROR_TEXT: Record<string, string> = {
   RESERVATION_CANCELLED: '취소된 예약은 변경할 수 없습니다.',
   CLEANING_TASK_CANCELLED: '취소된 청소 작업은 변경할 수 없습니다.',
+  NOT_CHECKOUT_CLEANING: '퇴실 청소 작업만 변경할 수 있습니다.',
+  RESERVATION_NOT_FOUND: '예약을 찾을 수 없습니다. 목록을 새로고침해 주세요.',
+  CLEANING_TASK_NOT_FOUND: '청소 작업을 찾을 수 없습니다. 목록을 새로고침해 주세요.',
 };
 
+/** Korean message for a failed save; server/validation text never reaches the screen. */
 export function errorText(err: unknown): string {
   if (err instanceof ApiError) {
+    if (err.status === 401) return '로그인이 만료되었습니다. 다시 로그인해 주세요.';
     if (err.status === 403) return '이 작업을 수행할 권한이 없습니다.';
-    return ERROR_TEXT[err.message] ?? err.message;
+    const known = Object.prototype.hasOwnProperty.call(ERROR_TEXT, err.message);
+    if (known) return ERROR_TEXT[err.message];
   }
-  return '저장에 실패했습니다. 잠시 후 다시 시도해 주세요.';
+  return SAVE_FAILED;
 }
 
 /** Put a fresh view into every cached reservation list, then refetch everything related. */

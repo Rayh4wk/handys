@@ -199,6 +199,19 @@ describe('write api', () => {
     expect(await prisma.auditLog.count()).toBe(0);
   });
 
+  it('rescheduling a cancelled cleaning task is 422 and changes nothing', async () => {
+    await prisma.cleaningTask.update({ where: { id: 'C-102' }, data: { status: 'CANCELLED' } });
+    const before = await snapshot();
+    const ops = await loginAs(app, 'ops');
+    const res = await ops
+      .patch('/api/cleaning-tasks/C-102/schedule')
+      .send({ scheduledStartAt: '2026-10-26T13:30:00+09:00', version: 1 })
+      .expect(422);
+    expect(res.body.message).toBe('CLEANING_TASK_CANCELLED');
+    expect(await snapshot()).toEqual(before);
+    expect(await prisma.auditLog.count()).toBe(0);
+  });
+
   it('cancelled reservation change is 422 and inspection stays EXCLUDED', async () => {
     const before = await snapshot();
     const agent = await loginAs(app, 'agent');

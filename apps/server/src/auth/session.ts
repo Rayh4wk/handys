@@ -3,7 +3,7 @@ import { createHmac, timingSafeEqual } from 'crypto';
 export const SESSION_COOKIE = 'sid';
 
 export function getSessionSecret(): string {
-  return process.env.SESSION_SECRET ?? 'dev-only-secret';
+  return process.env.SESSION_SECRET || 'dev-only-secret';
 }
 
 function mac(id: string, secret: string): string {

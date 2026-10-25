@@ -1,4 +1,4 @@
-import { signSession, verifySession } from './session';
+import { getSessionSecret, signSession, verifySession } from './session';
 
 describe('session', () => {
   const secret = 'test-secret';
@@ -23,5 +23,25 @@ describe('session', () => {
   it('rejects undefined and malformed tokens', () => {
     expect(verifySession(undefined, secret)).toBeNull();
     expect(verifySession('nodot', secret)).toBeNull();
+  });
+
+  describe('getSessionSecret', () => {
+    const original = process.env.SESSION_SECRET;
+    afterEach(() => {
+      if (original === undefined) delete process.env.SESSION_SECRET;
+      else process.env.SESSION_SECRET = original;
+    });
+
+    it('uses SESSION_SECRET when set', () => {
+      process.env.SESSION_SECRET = 'configured';
+      expect(getSessionSecret()).toBe('configured');
+    });
+
+    it('falls back when SESSION_SECRET is unset or empty', () => {
+      delete process.env.SESSION_SECRET;
+      expect(getSessionSecret()).toBe('dev-only-secret');
+      process.env.SESSION_SECRET = '';
+      expect(getSessionSecret()).toBe('dev-only-secret');
+    });
   });
 });

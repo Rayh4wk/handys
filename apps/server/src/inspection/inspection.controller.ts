@@ -1,4 +1,5 @@
-import { BadRequestException, Controller, Get, Post, Query } from '@nestjs/common';
+import { BadRequestException, Controller, Get, HttpCode, Post, Query } from '@nestjs/common';
+import { Roles } from '../auth/roles.decorator';
 import { ReservationsService } from '../reservations/reservations.service';
 import { ReservationView } from '../reservations/reservation-view';
 import { InspectionService } from './inspection.service';
@@ -22,6 +23,8 @@ export class InspectionController {
   }
 
   @Post('run')
+  @Roles('OPERATIONS_MANAGER')
+  @HttpCode(200)
   run(): Promise<{ checked: number }> {
     return this.inspection.runAll();
   }

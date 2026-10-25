@@ -140,13 +140,99 @@ describe('OperationsPage', () => {
     expect((screen.getByTestId('cleaning-input') as HTMLInputElement).value).toBe('2026-10-26T12:00');
   });
 
-  it('shows server error message on other failures', async () => {
+  it.each([
+    [new ApiError(400, { message: ['reason must be shorter than or equal to 200 characters'] })],
+    [new ApiError(500, { message: 'Internal server error' })],
+    [new ApiError(422, { message: 'SOMETHING_NEW' })],
+    [new TypeError('Failed to fetch')],
+  ])('shows a generic Korean message for unmapped failures (%s)', async (err) => {
     const user = userEvent.setup();
-    mocked.rescheduleCleaning.mockRejectedValue(new ApiError(400, { message: ['bad time'] }));
+    mocked.rescheduleCleaning.mockRejectedValue(err);
     renderWithClient(<OperationsPage />);
     await user.click(await screen.findByTestId('inspection-row-R-101'));
     await user.click(screen.getByTestId('cleaning-save'));
-    expect(await screen.findByTestId('error-notice')).toHaveTextContent('bad time');
+    const notice = await screen.findByTestId('error-notice');
+    expect(notice).toHaveTextContent('저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+    expect(notice.textContent).not.toMatch(/[A-Za-z]/);
+  });
+
+  it.each([
+    [422, 'CLEANING_TASK_CANCELLED', '취소된 청소 작업은 변경할 수 없습니다.'],
+    [422, 'RESERVATION_CANCELLED', '취소된 예약은 변경할 수 없습니다.'],
+    [404, 'CLEANING_TASK_NOT_FOUND', '청소 작업을 찾을 수 없습니다. 목록을 새로고침해 주세요.'],
+    [404, 'RESERVATION_NOT_FOUND', '예약을 찾을 수 없습니다. 목록을 새로고침해 주세요.'],
+    [403, 'FORBIDDEN_ROLE', '이 작업을 수행할 권한이 없습니다.'],
+  ])('maps %i %s to Korean', async (status, code, text) => {
+    const user = userEvent.setup();
+    mocked.rescheduleCleaning.mockRejectedValue(new ApiError(status, { message: code }));
+    renderWithClient(<OperationsPage />);
+    await user.click(await screen.findByTestId('inspection-row-R-101'));
+    await user.click(screen.getByTestId('cleaning-save'));
+    expect(await screen.findByTestId('error-notice')).toHaveTextContent(text);
+  });
+
+  it('caps the memo at 200 characters', async () => {
+    const user = userEvent.setup();
+    renderWithClient(<OperationsPage />);
+    await user.click(await screen.findByTestId('inspection-row-R-101'));
+    expect(screen.getByTestId('cleaning-reason')).toHaveAttribute('maxLength', '200');
+  });
+
+  it('marks the selected row with aria-current', async () => {
+    const user = userEvent.setup();
+    renderWithClient(<OperationsPage />);
+    const row = await screen.findByTestId('inspection-row-R-101');
+    expect(row).not.toHaveAttribute('aria-current');
+    await user.click(row);
+    expect(row).toHaveAttribute('aria-current', 'true');
+    expect(row).not.toHaveAttribute('aria-selected');
+  });
+
+  it('the 조치 필요 group label sets the action-required filter', async () => {
+    const user = userEvent.setup();
+    renderWithClient(<OperationsPage />);
+    await screen.findByTestId('inspection-row-R-101');
+    await user.click(screen.getByTestId('summary-NORMAL'));
+    expect(rowIds()).toEqual(['R-102']);
+    const group = screen.getByRole('button', { name: /조치 필요/ });
+    expect(group).toHaveAttribute('aria-pressed', 'false');
+    await user.click(group);
+    expect((screen.getByTestId('status-filter') as HTMLSelectElement).value).toBe('ACTION_REQUIRED');
+    expect(group).toHaveAttribute('aria-pressed', 'true');
+    expect(rowIds()).toEqual(['R-101', 'R-103', 'R-104']);
+  });
+
+  it('hides the recheck result once a newer judgment arrives', async () => {
+    const user = userEvent.setup();
+    const saved = makeReservation('R-101', {
+      status: 'NORMAL',
+      checkoutAt: '2026-10-26T04:00:00.000Z',
+      cleaning: { scheduledStartAt: '2026-10-26T04:30:00.000Z', version: 2 },
+    });
+    saved.inspection!.checkedAt = '2026-10-25T01:00:00.000Z';
+    mocked.rescheduleCleaning.mockResolvedValue(saved);
+    const { queryClient } = renderWithClient(<OperationsPage />);
+    await user.click(await screen.findByTestId('inspection-row-R-101'));
+    mocked.listInspections.mockResolvedValue(fixture().map((r) => (r.id === 'R-101' ? saved : r)));
+    fireEvent.change(screen.getByTestId('cleaning-input'), { target: { value: '2026-10-26T13:30' } });
+    await user.click(screen.getByTestId('cleaning-save'));
+    expect(await screen.findByTestId('recheck-result')).toHaveTextContent('재점검 결과: 정상');
+
+    // the agent moves the checkout again → a newer CONFLICT judgment arrives over SSE
+    const later = makeReservation('R-101', {
+      status: 'CONFLICT',
+      checkoutAt: '2026-10-26T06:00:00.000Z',
+      cleaning: { scheduledStartAt: '2026-10-26T04:30:00.000Z', version: 2 },
+      version: 3,
+    });
+    later.inspection!.checkedAt = '2026-10-25T02:00:00.000Z';
+    mocked.listInspections.mockResolvedValue(fixture().map((r) => (r.id === 'R-101' ? later : r)));
+    await queryClient.invalidateQueries();
+    const panel = screen.getByTestId('detail-panel');
+    await waitFor(() =>
+      expect(within(panel).getAllByTestId('status-badge')[0]).toHaveAttribute('data-status', 'CONFLICT'),
+    );
+    expect(screen.queryByTestId('recheck-result')).not.toBeInTheDocument();
   });
 
   it('sends the cleaning version captured when the panel opened, even after a refetch', async () => {

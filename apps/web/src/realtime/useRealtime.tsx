@@ -11,6 +11,7 @@ import { RealtimeContext, type RealtimeState, type RealtimeValue } from './realt
 
 declare global {
   interface Window {
+    // e2e latency-measurement hook: the Playwright suite reads when the last SSE event arrived.
     __lastSseEvent?: { receivedAt: number; data: unknown };
   }
 }
@@ -77,6 +78,7 @@ export function RealtimeProvider({ enabled, children }: { enabled: boolean; chil
       } catch {
         return;
       }
+      // e2e latency-measurement hook (see the Window declaration above).
       window.__lastSseEvent = { receivedAt: Date.now(), data };
       if (data?.type === 'reservation.updated') {
         void queryClient.invalidateQueries({ queryKey: ['reservations'] });

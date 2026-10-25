@@ -43,5 +43,5 @@ execFileSync('npx', ['prisma', 'migrate', 'reset', '--force'], {
   env: { ...process.env, DATABASE_URL: url },
 });
 console.log(
-  'setup: done. Start with `npm run dev` and open http://localhost:5300 (API on :3300). Demo accounts: agent / ops, password demo1234.',
+  'setup: done. Start with `npm run dev` and open http://localhost:5300 (API on :3300). 계정은 README 참고.',
 );
