@@ -1,0 +1,12 @@
+.git
+.superpowers
+**/node_modules
+**/dist
+**/coverage
+**/*.tsbuildinfo
+**/.env
+**/.env.*
+*.log
+test-results
+playwright-report
+e2e/latency.json

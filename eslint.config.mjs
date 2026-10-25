@@ -17,7 +17,7 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['apps/server/**/*.ts', 'apps/e2e/**/*.ts'],
+    files: ['apps/server/**/*.ts', 'e2e/**/*.ts'],
     languageOptions: { globals: { ...globals.node } },
   },
   {

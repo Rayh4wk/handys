@@ -2,13 +2,14 @@
   "name": "handys",
   "private": true,
   "workspaces": [
-    "apps/*"
+    "apps/*",
+    "e2e"
   ],
   "scripts": {
     "build": "npm run build -w apps/web && npm run build -w apps/server",
     "test": "npm test -w apps/server && npm test -w apps/web",
     "test:int": "npm run test:int -w apps/server",
-    "e2e": "npm test -w apps/e2e",
+    "e2e": "npm run build && npm test -w e2e",
     "start": "npm run start:prod -w apps/server",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "npm run typecheck --workspaces --if-present"
