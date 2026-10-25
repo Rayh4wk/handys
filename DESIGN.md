@@ -104,14 +104,14 @@ sequenceDiagram
 - **FE 버전 처리.** 편집 폼은 열린 시점의 version을 상태로 보관해 그 값을 보낸다. SSE 재조회로 목록의 version이 바뀌어도 폼이 보내는 version은 바뀌지 않으므로, 오래된 입력이 새 version으로 저장되지 않는다. 409를 받으면 "다른 사용자가 먼저 수정했습니다. 최신 상태를 불러왔습니다."를 표시하고 입력값과 기준 version을 최신 값으로 바꾼다. `current`가 없는 409도 충돌로 처리한다.
 - **원자성.** 값 변경, 재판정, 이력 기록은 함께 커밋되거나 함께 롤백된다. 점검 저장 실패 시 예약 변경까지 롤백되는지는 `InspectionRepository`를 실패하도록 교체한 통합 테스트로 확인한다.
 - **SSE 발행 시점.** `emit`은 트랜잭션 Promise가 성공한 뒤에만 호출된다. 409·422·400·500에서는 발행하지 않는다.
-- **입력 검증.** `class-validator`. 시각은 오프셋을 포함한 ISO 8601이어야 하고 실제로 존재하는 날짜여야 한다(`2026-02-30` 거부). `version`은 1 이상의 정수. 체크아웃 사유는 공백 제거 후 1~200자 필수, 청소 메모는 선택(200자 이하, 빈 값은 NULL 저장). 전역 `ValidationPipe`의 `forbidNonWhitelisted`로 정의되지 않은 필드는 400이다. 없는 예약·작업은 404, 재실 청소 작업 변경은 422 `NOT_CHECKOUT_CLEANING`.
+- **입력 검증.** `class-validator`. 시각은 오프셋을 포함한 ISO 8601이어야 하고 실제로 존재하는 날짜여야 한다(`2026-02-30` 거부). `version`은 1 이상의 정수. 체크아웃 사유는 공백 제거 후 1~200자 필수, 청소 메모는 선택(200자 이하, 빈 값은 NULL 저장). 전역 `ValidationPipe`의 `forbidNonWhitelisted`로 정의되지 않은 필드는 400이다. 없는 예약·작업은 404, 재실 청소 작업 변경은 422 `NOT_CHECKOUT_CLEANING`, 취소된 청소 작업 변경은 422 `CLEANING_TASK_CANCELLED`(예약 행 잠금 안에서 확인, DB·이력 변경 없음).
 
 ## 5. 인증과 역할
 
 - 고정 데모 계정 2개(`apps/server/src/auth/accounts.ts`). 가입 기능은 없다.
 - 로그인하면 `sid` 쿠키를 발급한다. 값은 `계정id.HMAC-SHA256(계정id)`이고 비밀키는 `SESSION_SECRET`이다. `HttpOnly`, `SameSite=Lax`. 서버 메모리에 세션을 두지 않으므로 서버를 재시작해도 로그인이 유지된다. 만료·폐기·`Secure` 플래그는 없다(데모 범위).
 - 전역 `AuthGuard`가 `@Public()`이 붙은 `POST /api/auth/login`을 제외한 모든 `/api` 요청에서 쿠키를 검증한다. 없거나 변조되면 401.
-- 변경 API는 `@Roles`로 역할을 검사한다. 체크아웃 변경은 `RESERVATION_AGENT`, 청소 일정 변경은 `OPERATIONS_MANAGER`만 가능하고, 그 외는 403이다. 조회와 SSE는 두 역할 모두 허용한다.
+- 변경 API는 `@Roles`로 역할을 검사한다. 체크아웃 변경은 `RESERVATION_AGENT`, 청소 일정 변경과 전체 재점검(`POST /api/inspection-results/run`)은 `OPERATIONS_MANAGER`만 가능하고, 그 외는 403이다. 조회와 SSE는 두 역할 모두 허용한다.
 - 이력의 `actor_id`·`actor_role`은 가드가 넣은 세션 계정에서만 채운다. 본문의 `actorId`·`role`은 400이다.
 - FE는 `RequireRole`로 다른 역할의 화면 접근 시 안내를 표시하고, 비로그인 사용자는 `/login`으로 보낸다. FE 처리는 편의용이고, 권한의 기준은 서버 검사다.
 - 정적 SPA 파일은 Nest 라우터 밖의 express 정적 핸들러가 제공하므로 가드를 거치지 않는다.
@@ -129,13 +129,15 @@ sequenceDiagram
 | PATCH | `/api/reservations/:id/checkout` | 예약 담당 | `{checkoutAt, reason, version}` → 최신 view |
 | PATCH | `/api/cleaning-tasks/:id/schedule` | 현장 운영 | `{scheduledStartAt, reason?, version}` → 최신 view |
 | GET | `/api/inspection-results?status=` | 두 역할 | 판정 목록, 상태별 필터 |
-| POST | `/api/inspection-results/run` | 두 역할 | 전체 재점검(멱등 upsert), `{checked: n}` |
+| POST | `/api/inspection-results/run` | 현장 운영 | 전체 재점검(멱등 upsert), 200 `{checked: n}` |
 | GET | `/api/reservations/:id/audit-logs` | 두 역할 | 최신순 이력, 처리자 이름·역할 포함 |
 | GET | `/api/events` | 두 역할 | SSE |
 
 Reservation view: `{id, roomId, guestName, checkoutAt, status, version, cleaningTask: {id, scheduledStartAt, status, version} | null, inspection: {status, reasonCode, reasonText, checkedAt}}`.
 
-오류 응답: 400(입력), 401(비로그인), 403(역할), 404(없는 id), 409(버전 충돌, `current` 포함), 422(취소 예약, 재실 청소 작업).
+오류 응답: 400(입력), 401(비로그인), 403(역할), 404(없는 id: `RESERVATION_NOT_FOUND`, `CLEANING_TASK_NOT_FOUND`), 409(버전 충돌 `VERSION_CONFLICT`, `current` 포함), 422(`RESERVATION_CANCELLED` 취소 예약, `NOT_CHECKOUT_CLEANING` 재실 청소 작업, `CLEANING_TASK_CANCELLED` 취소된 청소 작업).
+
+화면은 서버 메시지를 그대로 보여 주지 않는다. 위 코드는 한국어 문구로 바꾸고, 그 밖의 400·5xx·네트워크 오류는 "저장에 실패했습니다. 잠시 후 다시 시도해 주세요."로 표시한다. 사유·메모 입력칸은 200자로 제한한다.
 
 ## 7. 실시간 처리와 장애 복구
 

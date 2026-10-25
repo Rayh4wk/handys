@@ -1,16 +1,16 @@
 # 시험 보고서
 
-- 실행 일시: 2026-10-25 21:05–21:06 KST, 커밋 `e5e7043` 기준
+- 실행 일시: 2026-10-25 21:28–21:33 KST, 커밋 `1c5d389` 기준
 - 실행 구성: Node 22.20.0, PostgreSQL 15.13, Playwright 1.53.2 (Chromium)
-- 실행한 명령: `npm test`, `npm run test:int`, `npm run lint`, `npm run typecheck`, `npm run e2e` (순서대로 1회씩, 모두 exit 0)
+- 실행한 명령: `npm test`, `npm run test:int`, `npm run lint`, `npm run typecheck`, `npm run build`, `npm run e2e` (e2e는 2회 연속, 모두 exit 0)
 
 ## 1. 실행 결과 요약
 
 | 명령 | 결과 |
 |---|---|
-| `npm test` | 서버 Jest 2 suites, 16 passed / 웹 Vitest 5 files, 37 passed |
-| `npm run test:int` | 6 suites, 37 passed (실제 PostgreSQL `handys_test`, 3.9 s) |
-| `npm run e2e` | 웹·서버 빌드 후 Playwright 11 passed (13.6 s), `handys_e2e` 초기화 후 서버 포트 3100 |
+| `npm test` | 서버 Jest 2 suites, 18 passed / 웹 Vitest 5 files, 51 passed |
+| `npm run test:int` | 6 suites, 38 passed (실제 PostgreSQL `handys_test`, 5.2 s) |
+| `npm run e2e` | 웹·서버 빌드 후 Playwright 11 passed (13.5 s, 13.6 s), `handys_e2e` 초기화 후 서버 포트 3100 |
 | `npm run lint` | `eslint . --max-warnings 0`, 출력 없음(0 problems) |
 | `npm run typecheck` | server, web, e2e `tsc --noEmit` 오류 0 |
 
@@ -18,14 +18,14 @@
 # npm test (apps/server)
 PASS src/inspection/judge.spec.ts
 PASS src/auth/session.spec.ts
-Tests:       16 passed, 16 total
+Tests:       18 passed, 18 total
 # npm test (apps/web)
  ✓ src/lib/kst.test.ts (7 tests)
  ✓ src/realtime/useRealtime.test.tsx (11 tests)
  ✓ src/auth/AuthProvider.test.tsx (1 test)
- ✓ src/pages/OperationsPage.test.tsx (8 tests)
- ✓ src/pages/ReservationsPage.test.tsx (10 tests)
-      Tests  37 passed (37)
+ ✓ src/pages/OperationsPage.test.tsx (20 tests)
+ ✓ src/pages/ReservationsPage.test.tsx (12 tests)
+      Tests  51 passed (51)
 
 # npm run test:int
 PASS test/events.int-spec.ts
@@ -34,7 +34,7 @@ PASS test/write-api.int-spec.ts
 PASS test/read-api.int-spec.ts
 PASS test/schema.int-spec.ts
 PASS test/auth.int-spec.ts
-Tests:       37 passed, 37 total
+Tests:       38 passed, 38 total
 
 # npm run e2e
   ✓  1 demo-flow.spec.ts › demo flow: checkout change → conflict on ops → ops reschedules → agent sees normal (1.2s)
@@ -48,7 +48,7 @@ Tests:       37 passed, 37 total
   ✓  9 roles.spec.ts › wrong password shows a login error (260ms)
   ✓ 10 visual.spec.ts › login screen fits desktop and phone widths (225ms)
   ✓ 11 visual.spec.ts › role screens fit desktop and phone widths (1.1s)
-  11 passed (13.6s)
+  11 passed (13.5s)
 ```
 
 테스트 계층: 판정 경계값은 단위 테스트(`judge.spec.ts`), 트랜잭션·잠금·동시 수정·권한은 실제 PostgreSQL을 쓰는 통합 테스트(`apps/server/test/*.int-spec.ts`, supertest), 두 화면 간 갱신·재연결은 빌드된 앱을 대상으로 한 Playwright 테스트(`e2e/tests`)에서 확인한다. 웹 단위 테스트는 `TZ=America/New_York`, e2e는 `timezoneId: America/New_York`에서 실행해 KST 변환이 브라우저 시간대에 의존하지 않음을 함께 확인한다.
@@ -71,7 +71,7 @@ Tests:       37 passed, 37 total
 | 10 | 다른 운영 화면을 열어 둔 상태에서 변경 | 정상 연결 시 2초 안에 갱신 | 5회 측정 최대 4 ms(응답 종료 기준), 36 ms(요청 시작 기준). 데모 흐름에서 운영·예약 화면 모두 e2e 대기 제한 2초 안에 갱신(정밀한 값은 지연 측정 테스트) | `[e2e]` realtime "measures cross-screen latency", demo-flow / `[int]` events "streams reservation.updated as an unnamed event after a change", write-api "emits SSE only after commit" / `[web]` useRealtime "invalidates reservation queries on reservation.updated" |
 | 11 | SSE 연결 해제 중 변경 | 재연결 후 최신 상태 복구 | 끊긴 동안(2초) 이전 값 유지 + 끊김 경고, 다시 연결 후 2초 안에 최신 값. 네트워크 오프라인(1초) 후 복구 시 최신 값과 연결 상태 복원(약 0.6초, Task 9 보고) | `[e2e]` realtime "recovers after SSE disconnect", "recovers after network offline" / `[web]` useRealtime "invalidates all queries when connection opens", "goes to reconnecting on error and recreates after 3s when CLOSED", "pause closes the EventSource and sets disconnected", "resume opens a new one" |
 | 12 | BE 재시작 | 저장된 예약·점검·이력 유지 | 변경 후 Nest 앱을 닫고 새로 생성해도 체크아웃·version·판정(`CONFLICT`)·이력(처리자 포함) 유지. 종료 시 열린 SSE 스트림이 닫혀 종료가 멈추지 않음 | `[int]` write-api "persists after app restart", events "app.close() completes open SSE streams instead of hanging" |
-| 13 | 동일 점검 반복 | 결과 중복 생성 없음 | 전체 재점검 3회 후 점검 결과 6건 그대로, 판정 동일. 같은 예약의 두 번째 퇴실 청소 작업은 DB가 거부 | `[int]` read-api "run is idempotent", schema "rejects a second CHECKOUT task for the same reservation", "allows a STAYOVER task next to a CHECKOUT task" |
+| 13 | 동일 점검 반복 | 결과 중복 생성 없음 | 전체 재점검 3회 후 점검 결과 6건 그대로, 판정 동일. 같은 예약의 두 번째 퇴실 청소 작업은 DB가 거부 | `[int]` read-api "run is ops-only and idempotent", schema "rejects a second CHECKOUT task for the same reservation", "allows a STAYOVER task next to a CHECKOUT task" |
 
 참고: #12는 같은 테스트 프로세스 안에서 Nest 애플리케이션을 닫았다가 다시 만드는 방식이다. 운영체제 프로세스 재시작이나 컨테이너 재시작은 자동 테스트하지 않았다. 세션은 서명 쿠키라 서버 메모리 상태가 없다.
 
@@ -102,9 +102,15 @@ Tests:       37 passed, 37 total
 | 이력의 처리자 | 세션 계정과 사유 기록 | `actor` = 세션 계정(이름·역할), 사유 기록, 빈 메모는 NULL | `[int]` write-api "audit logs record reason and session actor", "stores empty cleaning reason as null" |
 | 두 역할의 조회 | 둘 다 판정 목록 조회 가능 | 200, 판정 포함 | `[int]` read-api "lists judged reservations for %s" (ops, agent) |
 | 세션 쿠키 변조·다른 키 | 거부 | 거부 | `[unit]` session.spec "rejects a tampered signature", "rejects a swapped id", "rejects a different secret", "rejects undefined and malformed tokens" |
+| 빈 `SESSION_SECRET` | 기본 키로 대체 | 미설정·빈 문자열 모두 기본 키 | `[unit]` session.spec "falls back when SESSION_SECRET is unset or empty" |
 | 잘못된 비밀번호, 로그인·로그아웃 | 401·오류 표시 / HttpOnly 쿠키 / 쿠키 삭제 | 기대대로 동작 | `[int]` auth "rejects a wrong password", "logs in with an HttpOnly sid cookie", "logout clears the session" / `[e2e]` roles "wrong password shows a login error" / `[web]` AuthProvider "clears me when a mutation fails with 401" |
 | 잘못된 입력(존재하지 않는 날짜, 오프셋 없는 시각, 소수 version, 누락 필드, 빈 사유) | 400 | 400 | `[int]` write-api "rejects invalid input" |
 | 없는 예약·작업, 재실 청소 작업 변경 | 404 / 422 | 404, 404, 422 | `[int]` write-api "unknown reservation 404, unknown task 404, STAYOVER task 422" |
+| 취소된 청소 작업 변경 | 422 `CLEANING_TASK_CANCELLED`, 변경 없음 | 422, DB 스냅샷 동일, 이력 0건 | `[int]` write-api "rescheduling a cancelled cleaning task is 422 and changes nothing" |
+| 전체 재점검 권한 | 운영 담당만 200 | 예약 담당 403, 운영 담당 200 | `[int]` read-api "run is ops-only and idempotent" |
+| 저장 실패 문구 | 서버·영문 메시지 미노출 | 알려진 코드는 한국어, 그 밖의 400·5xx·네트워크 오류는 공통 문구. 사유·메모 200자 제한 | `[web]` OperationsPage "maps %i %s to Korean", "shows a generic Korean message for unmapped failures (%s)", "caps the memo at 200 characters" / ReservationsPage "shows error notice on other failures", "caps the reason at 200 characters" |
+| 재점검 결과 표시 | 이후 판정이 바뀌면 사라짐 | 새 판정(checkedAt 변경) 도착 시 숨김 | `[web]` OperationsPage "hides the recheck result once a newer judgment arrives" |
+| 결과 패널 청소 시작 | 저장 시점 값 유지, 변경 시 현재 값 추가 | "기존 청소 시작: 11:30" 유지, "현재 청소 시작: 13:30" 추가 | `[web]` ReservationsPage "keeps the cleaning start from save time and shows the current one when it changes" |
 | 시각 저장 형식 | `timestamptz` | `timestamptz`로 저장, 시점 일치 | `[int]` schema "stores timestamptz" |
 | KST 입력·표시 변환 | 브라우저 시간대와 무관하게 KST | 날짜 경계 포함 왕복 일치 | `[web]` kst "kstInputToIso converts KST local input to UTC ISO", "round-trips across the date boundary" 외 |
 | 화면 폭 1280px / 390px | 가로 스크롤 없음, 주요 영역 표시 | 통과 | `[e2e]` visual "login screen fits desktop and phone widths", "role screens fit desktop and phone widths" |
@@ -122,7 +128,7 @@ Tests:       37 passed, 37 total
 | 커밋 후 알림 유실 | 커밋 직후 SSE 발행 전에 서버가 종료되면 그 알림은 사라진다. 재연결 시 전체 재조회 또는 30초 주기 재조회로 복구한다. 이벤트 저장·재생은 범위 밖이다. |
 | BE 재시작 시험 방식 | #12는 프로세스 내 앱 재생성으로 확인했다. 실제 프로세스·컨테이너 재시작은 자동화하지 않았다. |
 | 타입 정보 기반 lint 미사용 | ESLint는 typescript-eslint `recommended`(타입 정보 미사용)다. `no-floating-promises` 같은 규칙은 적용되지 않는다. |
-| 세션 | 만료·폐기·`Secure` 플래그가 없다. `SESSION_SECRET`이 빈 문자열이어도 받아들인다. 데모 계정 범위로 둔 결정이다. |
+| 세션 | 만료·폐기·`Secure` 플래그가 없다. 데모 계정 범위로 둔 결정이다. |
 | 시드 재실행 | `prisma db seed` 자체는 멱등이 아니다(같은 id로 `create`). 로컬은 `npm run setup`이 DB를 초기화하고, Docker는 예약이 0건일 때만 시드한다. |
 | 전체 재점검 중 예약 삭제 | `runAll` 도중 예약이 삭제되면 그 지점에서 중단된다. 예약 삭제 기능이 없어 현재 경로로는 발생하지 않는다. |
 | 판정 입력의 Invalid Date | `judge`는 `NaN` 시각을 거르지 않는다. 입력은 DB `timestamptz`와 검증된 ISO 문자열에서만 오므로 현재 경로로는 도달하지 않는다. |
