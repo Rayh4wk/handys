@@ -14,7 +14,8 @@ import {
   byPriorityThenId,
   checkoutText,
   cleaningText,
-  conflictCurrent,
+  isConflict,
+  refreshAfterConflict,
   errorText,
   statusOf,
   type SaveNotice,
@@ -206,6 +207,8 @@ function CleaningForm({
 }) {
   const queryClient = useQueryClient();
   const [input, setInput] = useState(() => isoToKstInput(task.scheduledStartAt));
+  // Optimistic lock: version of the task as it was when this form opened (see CheckoutEditor).
+  const [baseVersion, setBaseVersion] = useState(task.version);
   const [reason, setReason] = useState('');
   const [notice, setNotice] = useState<SaveNotice | null>(null);
   const [recheck, setRecheck] = useState<InspectionStatus | null>(null);
@@ -231,22 +234,29 @@ function CleaningForm({
     setRecheck(null);
     const memo = reason.trim();
     mutation.mutate(
-      { scheduledStartAt, ...(memo ? { reason: memo } : {}), version: task.version },
+      { scheduledStartAt, ...(memo ? { reason: memo } : {}), version: baseVersion },
       {
         onSuccess: (saved) => {
           applyServerView(queryClient, saved);
           setRecheck(statusOf(saved));
           setReason('');
+          if (saved.cleaningTask) {
+            setBaseVersion(saved.cleaningTask.version);
+            setInput(isoToKstInput(saved.cleaningTask.scheduledStartAt));
+          }
         },
         onError: (err) => {
-          const current = conflictCurrent(err);
-          if (current) {
-            applyServerView(queryClient, current);
-            setInput(isoToKstInput(current.cleaningTask?.scheduledStartAt ?? null));
-            setNotice({ kind: 'conflict' });
-          } else {
+          if (!isConflict(err)) {
             setNotice({ kind: 'error', message: errorText(err) });
+            return;
           }
+          setNotice({ kind: 'conflict' });
+          void refreshAfterConflict(queryClient, err, reservation.id).then((latest) => {
+            const latestTask = latest?.cleaningTask;
+            if (!latestTask) return;
+            setInput(isoToKstInput(latestTask.scheduledStartAt));
+            setBaseVersion(latestTask.version);
+          });
         },
       },
     );

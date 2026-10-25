@@ -11,7 +11,8 @@ import {
   byId,
   checkoutText,
   cleaningTimeText,
-  conflictCurrent,
+  isConflict,
+  refreshAfterConflict,
   errorText,
   statusOf,
   timeOrMissing,
@@ -156,6 +157,9 @@ function CheckoutEditor({
 }) {
   const queryClient = useQueryClient();
   const [input, setInput] = useState(() => isoToKstInput(reservation.checkoutAt));
+  // Optimistic lock: the version of the data the user is editing, captured when the editor
+  // opens — not the live list value, so a concurrent change (seen via SSE) still yields a 409.
+  const [baseVersion, setBaseVersion] = useState(reservation.version);
   const [reason, setReason] = useState('');
   const [notice, setNotice] = useState<SaveNotice | null>(null);
 
@@ -179,7 +183,7 @@ function CheckoutEditor({
     setNotice(null);
     const previousCheckoutAt = reservation.checkoutAt;
     mutation.mutate(
-      { checkoutAt, reason: reason.trim(), version: reservation.version },
+      { checkoutAt, reason: reason.trim(), version: baseVersion },
       {
         onSuccess: (saved) => {
           applyServerView(queryClient, saved);
@@ -191,14 +195,16 @@ function CheckoutEditor({
           });
         },
         onError: (err) => {
-          const current = conflictCurrent(err);
-          if (current) {
-            applyServerView(queryClient, current);
-            setInput(isoToKstInput(current.checkoutAt));
-            setNotice({ kind: 'conflict' });
-          } else {
+          if (!isConflict(err)) {
             setNotice({ kind: 'error', message: errorText(err) });
+            return;
           }
+          setNotice({ kind: 'conflict' });
+          void refreshAfterConflict(queryClient, err, reservation.id).then((latest) => {
+            if (!latest) return;
+            setInput(isoToKstInput(latest.checkoutAt));
+            setBaseVersion(latest.version);
+          });
         },
       },
     );

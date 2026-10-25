@@ -160,4 +160,59 @@ describe('ReservationsPage', () => {
     await user.click(within(editor).getByTestId('checkout-save'));
     expect(await screen.findByTestId('error-notice')).toHaveTextContent('checkoutAt must be ISO');
   });
+
+  it('sends the version captured when the editor opened, even after a refetch', async () => {
+    const { user, queryClient } = await (async () => {
+      const u = userEvent.setup();
+      const utils = renderWithClient(<ReservationsPage />);
+      const row = await screen.findByTestId('reservation-row-R-101');
+      await u.click(within(row).getByRole('button', { name: '체크아웃 변경' }));
+      return { user: u, queryClient: utils.queryClient };
+    })();
+    // another user changed the checkout to 12:00 (version 2); SSE refetch delivers it
+    mocked.listReservations.mockResolvedValue(
+      fixture().map((r) =>
+        r.id === 'R-101' ? makeReservation('R-101', { checkoutAt: '2026-10-26T03:00:00.000Z', version: 2 }) : r,
+      ),
+    );
+    await queryClient.invalidateQueries();
+    await waitFor(() =>
+      expect(screen.getByTestId('reservation-row-R-101')).toHaveTextContent('10/26 12:00'),
+    );
+    mocked.changeCheckout.mockRejectedValue(new ApiError(409, { message: 'VERSION_CONFLICT' }));
+    const editor = screen.getByTestId('checkout-editor');
+    await user.type(within(editor).getByTestId('checkout-reason'), '고객 요청');
+    await user.click(within(editor).getByTestId('checkout-save'));
+    expect(mocked.changeCheckout).toHaveBeenCalledWith('R-101', {
+      checkoutAt: '2026-10-26T02:00:00.000Z',
+      reason: '고객 요청',
+      version: 1,
+    });
+    expect(await screen.findByTestId('conflict-notice')).toBeInTheDocument();
+  });
+
+  it('treats a 409 without current as a conflict: notice, refetch, reset to latest', async () => {
+    mocked.changeCheckout.mockRejectedValue(new ApiError(409, { message: 'VERSION_CONFLICT' }));
+    const { user, editor } = await openEditor();
+    const callsBefore = mocked.listReservations.mock.calls.length;
+    mocked.listReservations.mockResolvedValue(
+      fixture().map((r) =>
+        r.id === 'R-101' ? makeReservation('R-101', { checkoutAt: '2026-10-26T03:00:00.000Z', version: 2 }) : r,
+      ),
+    );
+    await user.type(within(editor).getByTestId('checkout-reason'), '고객 요청');
+    await user.click(within(editor).getByTestId('checkout-save'));
+    expect(await screen.findByTestId('conflict-notice')).toBeInTheDocument();
+    expect(screen.queryByTestId('error-notice')).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(mocked.listReservations.mock.calls.length).toBeGreaterThan(callsBefore),
+    );
+    await waitFor(() =>
+      expect((screen.getByTestId('checkout-input') as HTMLInputElement).value).toBe('2026-10-26T12:00'),
+    );
+    // the next save uses the refreshed version
+    mocked.changeCheckout.mockClear();
+    await user.click(screen.getByTestId('checkout-save'));
+    expect(mocked.changeCheckout).toHaveBeenCalledWith('R-101', expect.objectContaining({ version: 2 }));
+  });
 });

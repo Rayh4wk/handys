@@ -148,4 +148,62 @@ describe('OperationsPage', () => {
     await user.click(screen.getByTestId('cleaning-save'));
     expect(await screen.findByTestId('error-notice')).toHaveTextContent('bad time');
   });
+
+  it('sends the cleaning version captured when the panel opened, even after a refetch', async () => {
+    const user = userEvent.setup();
+    const { queryClient } = renderWithClient(<OperationsPage />);
+    await user.click(await screen.findByTestId('inspection-row-R-101'));
+    mocked.listInspections.mockResolvedValue(
+      fixture().map((r) =>
+        r.id === 'R-101'
+          ? makeReservation('R-101', {
+              status: 'CONFLICT',
+              checkoutAt: '2026-10-26T04:00:00.000Z',
+              cleaning: { scheduledStartAt: '2026-10-26T03:00:00.000Z', version: 2 },
+            })
+          : r,
+      ),
+    );
+    await queryClient.invalidateQueries();
+    await waitFor(() =>
+      expect(screen.getByTestId('inspection-row-R-101')).toHaveTextContent('10/26 12:00'),
+    );
+    mocked.rescheduleCleaning.mockRejectedValue(new ApiError(409, { message: 'VERSION_CONFLICT' }));
+    await user.click(screen.getByTestId('cleaning-save'));
+    expect(mocked.rescheduleCleaning).toHaveBeenCalledWith('C-101', {
+      scheduledStartAt: '2026-10-26T02:30:00.000Z',
+      version: 1,
+    });
+    expect(await screen.findByTestId('conflict-notice')).toBeInTheDocument();
+  });
+
+  it('treats a 409 without current as a conflict: notice, refetch, reset to latest', async () => {
+    const user = userEvent.setup();
+    mocked.rescheduleCleaning.mockRejectedValue(new ApiError(409, { message: 'VERSION_CONFLICT' }));
+    renderWithClient(<OperationsPage />);
+    await user.click(await screen.findByTestId('inspection-row-R-101'));
+    const callsBefore = mocked.listInspections.mock.calls.length;
+    mocked.listInspections.mockResolvedValue(
+      fixture().map((r) =>
+        r.id === 'R-101'
+          ? makeReservation('R-101', {
+              status: 'CONFLICT',
+              cleaning: { scheduledStartAt: '2026-10-26T03:00:00.000Z', version: 2 },
+            })
+          : r,
+      ),
+    );
+    await user.click(screen.getByTestId('cleaning-save'));
+    expect(await screen.findByTestId('conflict-notice')).toBeInTheDocument();
+    expect(screen.queryByTestId('error-notice')).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(mocked.listInspections.mock.calls.length).toBeGreaterThan(callsBefore),
+    );
+    await waitFor(() =>
+      expect((screen.getByTestId('cleaning-input') as HTMLInputElement).value).toBe('2026-10-26T12:00'),
+    );
+    mocked.rescheduleCleaning.mockClear();
+    await user.click(screen.getByTestId('cleaning-save'));
+    expect(mocked.rescheduleCleaning).toHaveBeenCalledWith('C-101', expect.objectContaining({ version: 2 }));
+  });
 });

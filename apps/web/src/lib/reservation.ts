@@ -68,12 +68,16 @@ export function byId(a: ReservationView, b: ReservationView): number {
 
 export type SaveNotice = { kind: 'conflict' } | { kind: 'error'; message: string };
 
-/** On 409 VERSION_CONFLICT the server sends the latest view. */
+export function isConflict(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 409;
+}
+
+/** On 409 VERSION_CONFLICT the server normally sends the latest view. */
 export function conflictCurrent(err: unknown): ReservationView | null {
-  if (!(err instanceof ApiError) || err.status !== 409) return null;
-  const body = err.body;
+  if (!isConflict(err)) return null;
+  const body = (err as ApiError).body;
   if (body && typeof body === 'object' && 'current' in body) {
-    return (body as { current: ReservationView }).current ?? null;
+    return (body as { current: ReservationView | null }).current ?? null;
   }
   return null;
 }
@@ -100,4 +104,34 @@ export function applyServerView(queryClient: QueryClient, view: ReservationView)
   void queryClient.invalidateQueries({ queryKey: queryKeys.reservations });
   void queryClient.invalidateQueries({ queryKey: ['inspection-results'] });
   void queryClient.invalidateQueries({ queryKey: queryKeys.auditLogs(view.id) });
+}
+
+/**
+ * After any 409: adopt the server's `current` view if present, refetch the related queries, and
+ * resolve with the latest known view (from the body, or from the refetched cache).
+ */
+export async function refreshAfterConflict(
+  queryClient: QueryClient,
+  err: unknown,
+  reservationId: string,
+): Promise<ReservationView | null> {
+  const current = conflictCurrent(err);
+  if (current) {
+    applyServerView(queryClient, current);
+    return current;
+  }
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: queryKeys.reservations }),
+    queryClient.invalidateQueries({ queryKey: ['inspection-results'] }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.auditLogs(reservationId) }),
+  ]);
+  const lists = [
+    ...queryClient.getQueriesData<ReservationView[]>({ queryKey: queryKeys.reservations }),
+    ...queryClient.getQueriesData<ReservationView[]>({ queryKey: ['inspection-results'] }),
+  ];
+  for (const [, list] of lists) {
+    const found = list?.find((r) => r.id === reservationId);
+    if (found) return found;
+  }
+  return null;
 }
