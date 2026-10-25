@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { InspectionRepository, Tx } from './inspection.repository';
 import { judge, JudgeResult } from './judge';
+import { lockReservation } from './reservation-lock';
 
 @Injectable()
 export class InspectionService {
@@ -29,7 +30,12 @@ export class InspectionService {
   async runAll(): Promise<{ checked: number }> {
     const rows = await this.prisma.reservation.findMany({ select: { id: true }, orderBy: { id: 'asc' } });
     for (const { id } of rows) {
-      await this.prisma.$transaction((tx) => this.recheck(tx, id));
+      // Same lock as ChangeService: otherwise a recheck could read pre-change values and
+      // overwrite the fresh judgment after the change commits.
+      await this.prisma.$transaction(async (tx) => {
+        await lockReservation(tx, id);
+        return this.recheck(tx, id);
+      });
     }
     return { checked: rows.length };
   }

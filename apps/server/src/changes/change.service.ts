@@ -8,6 +8,7 @@ import { Account } from '../auth/accounts';
 import { EventsService } from '../events/events.service';
 import { Tx } from '../inspection/inspection.repository';
 import { InspectionService } from '../inspection/inspection.service';
+import { lockReservation } from '../inspection/reservation-lock';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReservationView } from '../reservations/reservation-view';
 import { ReservationsService } from '../reservations/reservations.service';
@@ -27,7 +28,7 @@ export class ChangeService {
 
   async changeCheckout(reservationId: string, dto: ChangeCheckoutDto, actor: Account): Promise<ReservationView> {
     const view = await this.prisma.$transaction(async (tx) => {
-      await this.lockReservation(tx, reservationId);
+      await lockReservation(tx, reservationId);
       const r = await tx.reservation.findUniqueOrThrow({
         where: { id: reservationId },
         include: { inspectionResult: true },
@@ -73,7 +74,7 @@ export class ChangeService {
     const { reservationId } = found;
 
     const view = await this.prisma.$transaction(async (tx) => {
-      await this.lockReservation(tx, reservationId);
+      await lockReservation(tx, reservationId);
       const r = await tx.reservation.findUniqueOrThrow({
         where: { id: reservationId },
         include: { inspectionResult: true },
@@ -107,11 +108,6 @@ export class ChangeService {
     }, TX_OPTIONS);
     this.events.emit({ type: 'reservation.updated', reservationId, version: view.version });
     return view;
-  }
-
-  private async lockReservation(tx: Tx, id: string): Promise<void> {
-    const rows = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM reservations WHERE id = ${id} FOR UPDATE`;
-    if (rows.length === 0) throw new NotFoundException('RESERVATION_NOT_FOUND');
   }
 
   /** Throws 409 with the latest committed view (read while holding the lock; the tx then rolls back). */

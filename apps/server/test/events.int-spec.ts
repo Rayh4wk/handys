@@ -79,4 +79,33 @@ describe('events (SSE)', () => {
     expect(res.status).toBe(401);
     await res.body?.cancel();
   });
+  it('app.close() completes open SSE streams instead of hanging', async () => {
+    const other = await createTestApp();
+    await other.listen(0);
+    const port = (other.getHttpServer().address() as AddressInfo).port;
+    const login = await request(other.getHttpServer())
+      .post('/api/auth/login')
+      .send({ username: 'agent', password: 'demo1234' })
+      .expect(200);
+    const sid = (login.headers['set-cookie'] as unknown as string[]).find((c) => c.startsWith('sid='))!.split(';')[0];
+    const res = await fetch(`http://127.0.0.1:${port}/api/events`, { headers: { cookie: sid, connection: 'close' } });
+    expect(res.status).toBe(200);
+    const reader = res.body!.getReader();
+    const drained = (async () => {
+      for (;;) {
+        const { done } = await reader.read();
+        if (done) return 'ended';
+      }
+    })().catch(() => 'ended');
+
+    let timer: NodeJS.Timeout | undefined;
+    const outcome = await Promise.race([
+      other.close().then(() => drained),
+      new Promise<string>((resolve) => {
+        timer = setTimeout(() => resolve('hung'), 3000);
+      }),
+    ]).finally(() => clearTimeout(timer));
+    if (outcome === 'hung') (other.getHttpServer() as Server).closeAllConnections();
+    expect(outcome).toBe('ended');
+  });
 });
