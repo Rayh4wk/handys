@@ -106,7 +106,7 @@ test('measures cross-screen latency', async ({ browser }) => {
         measuredAt: new Date().toISOString(),
         reservation: 'R-106',
         method:
-          'agent browser PATCH timing (request start / response end, epoch ms from Playwright request.timing()) → ops browser badge data-status change (MutationObserver, Date.now() in page); both browsers on the same machine clock. The server emits the SSE event right after commit, before writing the PATCH response, so latencyMs can be ~0 or slightly negative on localhost.',
+          'agent browser PATCH timing (request start / response end, epoch ms from Playwright request.timing()) → ops browser badge data-status change (MutationObserver, Date.now() in page); both browsers on the same machine clock. The server emits the SSE event right after commit, before writing the PATCH response, so latencyMs is only a few ms on localhost; fromRequestStartMs includes the save round trip.',
         thresholdMs: 2000,
         samples,
         minMs: Math.min(...values),

@@ -9,7 +9,7 @@ import {
   setOpsFilter,
 } from '../helpers';
 
-// Assumes the seed state right after global setup's reset: R-101 checkout 11:00, cleaning 11:30.
+// Assumes the seed state right after the webServer's DB reset: R-101 checkout 11:00, cleaning 11:30.
 test('demo flow: checkout change → conflict on ops → ops reschedules → agent sees normal', async ({
   browser,
 }) => {
