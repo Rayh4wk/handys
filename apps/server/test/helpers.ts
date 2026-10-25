@@ -1,4 +1,5 @@
 import { INestApplication } from '@nestjs/common';
+import request from 'supertest';
 import { Test, TestingModuleBuilder } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
 import { seedDatabase } from '../prisma/seed';
@@ -22,4 +23,13 @@ export async function createTestApp(
   configureApp(app);
   await app.init();
   return app;
+}
+
+export async function loginAs(
+  app: INestApplication,
+  username: 'agent' | 'ops',
+): Promise<ReturnType<typeof request.agent>> {
+  const agent = request.agent(app.getHttpServer());
+  await agent.post('/api/auth/login').send({ username, password: 'demo1234' }).expect(200);
+  return agent;
 }
