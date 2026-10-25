@@ -1,6 +1,7 @@
 // `npm run setup`: (re)creates the local dev database from scratch — applies every migration and
 // loads the demo seed (`prisma migrate reset` runs the seed). Safe to run again at any time; it
-// always returns to the seed state. Guarded so it can never wipe the test/e2e databases.
+// always returns to the seed state. Guarded: local host only, database "handys" (or an explicit
+// SETUP_DB_NAME opt-in), never a test/e2e database.
 const { execFileSync } = require('child_process');
 const { existsSync, readFileSync } = require('fs');
 const { userInfo } = require('os');
@@ -18,13 +19,22 @@ function urlFromDotEnv() {
 const user = process.env.USER || userInfo().username;
 const url =
   process.env.DATABASE_URL || urlFromDotEnv() || `postgresql://${user}@localhost:5432/handys`;
-const dbName = new URL(url).pathname.replace(/^\//, '');
-if (!dbName.includes('handys') || /_(test|e2e)/.test(dbName)) {
-  console.error(
-    `setup: refusing to reset database "${dbName}" (must contain "handys" and not be a _test/_e2e database).`,
-  );
+// Only ever reset a local database. The expected name is "handys"; another local name needs an
+// explicit SETUP_DB_NAME=<name> opt-in (and still never a test/e2e database).
+const parsed = new URL(url);
+const dbName = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
+const host = parsed.hostname.replace(/^\[|\]$/g, '');
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+const allowedName = process.env.SETUP_DB_NAME || 'handys';
+const refuse = (why) => {
+  console.error(`setup: refusing to reset "${dbName}" on "${host}": ${why}`);
   process.exit(1);
+};
+if (!LOCAL_HOSTS.has(host)) refuse('host must be localhost, 127.0.0.1 or ::1.');
+if (dbName !== allowedName) {
+  refuse(`database name must be "${allowedName}" (set SETUP_DB_NAME to opt in to another name).`);
 }
+if (/test|e2e/i.test(dbName)) refuse('test/e2e databases are reset by their own runners.');
 
 console.log(`setup: resetting dev database "${dbName}" (migrations + demo seed)…`);
 execFileSync('npx', ['prisma', 'migrate', 'reset', '--force'], {
@@ -32,4 +42,6 @@ execFileSync('npx', ['prisma', 'migrate', 'reset', '--force'], {
   stdio: 'inherit',
   env: { ...process.env, DATABASE_URL: url },
 });
-console.log('setup: done. Start with `npm run dev`. Demo accounts: agent / ops, password demo1234.');
+console.log(
+  'setup: done. Start with `npm run dev` and open http://localhost:5300 (API on :3300). Demo accounts: agent / ops, password demo1234.',
+);

@@ -46,7 +46,7 @@ const rowIds = () =>
 describe('OperationsPage', () => {
   it('defaults to action-required filter sorted CONFLICT first', async () => {
     renderWithClient(<OperationsPage />);
-    expect(screen.getByRole('heading', { name: '현장 운영 — 청소 일정 점검' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '청소 일정 점검' })).toBeInTheDocument();
     await screen.findByTestId('inspection-row-R-101');
     expect((screen.getByTestId('status-filter') as HTMLSelectElement).value).toBe('ACTION_REQUIRED');
     expect(rowIds()).toEqual(['R-101', 'R-103', 'R-104']);

@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "build": "prisma generate && nest build",
-    "start:dev": "nest start --watch",
+    "start:dev": "PORT=${PORT:-3300} nest start --watch --path tsconfig.dev.json",
     "start:prod": "node dist/main.js",
     "test": "jest --config jest.config.js --passWithNoTests",
     "test:int": "node scripts/test-int.js",

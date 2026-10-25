@@ -30,15 +30,6 @@ const GUIDANCE: Record<InspectionStatus, string> = {
   EXCLUDED: '점검 대상에서 제외된 예약입니다.',
 };
 
-/** Headline of the judgment block (CONFLICT uses the fixed "청소 일정 조정 필요"). */
-const VERDICT: Record<InspectionStatus, string> = {
-  CONFLICT: '청소 일정 조정 필요',
-  NORMAL: '청소 일정 이상 없음',
-  NEEDS_CHECK: '운영 담당자 확인 필요',
-  UNDETERMINED: '운영 담당자 확인 필요',
-  EXCLUDED: '점검 대상 아님',
-};
-
 interface ChangeResult {
   reservationId: string;
   previousCheckoutAt: string | null;
@@ -64,11 +55,7 @@ export default function ReservationsPage() {
   return (
     <main className="page">
       <div className="page-head">
-        <h1>예약·고객 응대</h1>
-        <p className="page-lead">
-          고객 요청에 따라 체크아웃 시각을 변경합니다. 저장하면 청소 일정과의 충돌 여부를 바로
-          확인할 수 있습니다.
-        </p>
+        <h1>예약 관리</h1>
       </div>
 
       {q.isPending && <p className="muted state-line">예약 목록을 불러오는 중…</p>}
@@ -109,7 +96,16 @@ export default function ReservationsPage() {
                         cancelled ? 'row-cancelled' : '',
                       ].join(' ')}
                       aria-selected={r.id === selectedId}
+                      tabIndex={0}
                       onClick={() => select(r.id)}
+                      onKeyDown={(e) => {
+                        // Only the row itself: Enter/Space on the row button keep their own action.
+                        if (e.target !== e.currentTarget) return;
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          select(r.id);
+                        }
+                      }}
                     >
                       <td className="cell-id" data-label="예약 번호">
                         {r.id}
@@ -203,12 +199,7 @@ export default function ReservationsPage() {
               <AuditLogList reservationId={selected.id} />
             </section>
           ) : (
-            <aside className="detail-placeholder" aria-hidden={rows.length === 0}>
-              <p>
-                체크아웃을 바꿀 예약의 <strong>체크아웃 변경</strong>을 누르세요.
-              </p>
-              <p className="muted">저장하면 청소 일정과 맞는지 이 자리에 바로 표시됩니다.</p>
-            </aside>
+            <aside className="detail-placeholder">목록에서 예약을 선택하세요.</aside>
           )}
         </div>
       )}
@@ -287,7 +278,7 @@ function CheckoutEditor({
       </div>
       <div className="editor-fields">
         <label className="field">
-          <span className="field-label">변경할 체크아웃 (KST)</span>
+          <span className="field-label">변경할 체크아웃</span>
           <input
             type="datetime-local"
             data-testid="checkout-input"
@@ -304,7 +295,6 @@ function CheckoutEditor({
             type="text"
             data-testid="checkout-reason"
             value={reason}
-            placeholder="예: 고객 요청"
             onChange={(e) => setReason(e.target.value)}
             required
           />
@@ -318,7 +308,6 @@ function CheckoutEditor({
         <button type="button" onClick={onCancel} disabled={mutation.isPending}>
           취소
         </button>
-        {!reason.trim() && <span className="hint">변경 사유를 입력하면 저장할 수 있습니다.</span>}
       </div>
     </form>
   );
@@ -348,11 +337,7 @@ function ChangeResultPanel({ result, current }: { result: ChangeResult; current:
       </ul>
       <div className="result-judgment">
         <div className="result-judgment-head">
-          {conflict ? (
-            <p className="result-alert">청소 일정 조정 필요</p>
-          ) : (
-            status && <p className="result-verdict">{VERDICT[status]}</p>
-          )}
+          {conflict && <p className="result-alert">청소 일정 조정 필요</p>}
           <StatusBadge status={status} />
         </div>
         {status && <p className="result-guidance">{GUIDANCE[status]}</p>}

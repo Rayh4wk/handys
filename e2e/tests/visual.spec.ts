@@ -37,18 +37,21 @@ test('login screen fits desktop and phone widths', async ({ page }) => {
 
 test('role screens fit desktop and phone widths', async ({ browser }) => {
   const A = await openAs(browser, 'agent');
-  await check(A.page, 'reservations', ['reservation-row-R-101', 'sse-state', 'logout']);
+  let B: Awaited<ReturnType<typeof openAs>> | undefined;
+  try {
+    await check(A.page, 'reservations', ['reservation-row-R-101', 'sse-state', 'logout']);
 
-  const { status } = await changeCheckout(A.page, 'R-103', '2026-10-26T12:30', '고객 요청');
-  expect(status).toBe(200);
-  await expect(A.page.getByTestId('change-result')).toHaveAttribute('data-result', 'NEEDS_CHECK');
-  await check(A.page, 'reservations-result', ['change-result']);
+    const { status } = await changeCheckout(A.page, 'R-103', '2026-10-26T12:30', '고객 요청');
+    expect(status).toBe(200);
+    await expect(A.page.getByTestId('change-result')).toHaveAttribute('data-result', 'NEEDS_CHECK');
+    await check(A.page, 'reservations-result', ['change-result']);
 
-  const B = await openAs(browser, 'ops');
-  await inspectionRow(B.page, 'R-103').click();
-  await expect(B.page.getByTestId('audit-log-item').first()).toBeVisible();
-  await check(B.page, 'operations-detail', ['summary-CONFLICT', 'status-filter', 'detail-panel']);
-
-  await A.context.close();
-  await B.context.close();
+    B = await openAs(browser, 'ops');
+    await inspectionRow(B.page, 'R-103').click();
+    await expect(B.page.getByTestId('audit-log-item').first()).toBeVisible();
+    await check(B.page, 'operations-detail', ['summary-CONFLICT', 'status-filter', 'detail-panel']);
+  } finally {
+    await A.context.close();
+    await B?.context.close();
+  }
 });

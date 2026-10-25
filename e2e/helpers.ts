@@ -23,7 +23,8 @@ export async function openAs(
   const context =
     opts.context ?? (await browser.newContext({ baseURL: BASE_URL, timezoneId: 'America/New_York' }));
   const page = await context.newPage();
-  await page.goto('/login');
+  // ?demo=1 shows the demo-only realtime disconnect toggle (data-testid="sse-toggle").
+  await page.goto('/login?demo=1');
   if (!page.url().endsWith(HOME[role])) {
     await page.getByTestId('login-username').fill(role);
     await page.getByTestId('login-password').fill(DEMO_PASSWORD);
@@ -37,7 +38,7 @@ export async function openAs(
 /** Second tab in an existing (logged-in) context. */
 export async function openTab(context: BrowserContext, path: string): Promise<Page> {
   const page = await context.newPage();
-  await page.goto(path);
+  await page.goto(`${path}${path.includes('?') ? '&' : '?'}demo=1`);
   await expect(page.getByTestId('sse-state')).toHaveAttribute('data-state', 'open');
   return page;
 }

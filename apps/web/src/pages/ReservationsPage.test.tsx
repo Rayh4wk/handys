@@ -51,7 +51,7 @@ async function openEditor(id = 'R-101') {
 describe('ReservationsPage', () => {
   it('renders the table with 정보 누락 for missing checkout and disabled change for cancelled', async () => {
     renderWithClient(<ReservationsPage />);
-    expect(screen.getByRole('heading', { name: '예약·고객 응대' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '예약 관리' })).toBeInTheDocument();
     const r101 = await screen.findByTestId('reservation-row-R-101');
     expect(r101).toHaveTextContent('101호');
     expect(r101).toHaveTextContent('고객101');
@@ -60,6 +60,18 @@ describe('ReservationsPage', () => {
     expect(
       within(screen.getByTestId('reservation-row-R-105')).getByRole('button', { name: '체크아웃 변경' }),
     ).toBeDisabled();
+  });
+
+  it('selects a row from the keyboard (cancelled rows included)', async () => {
+    const user = userEvent.setup();
+    renderWithClient(<ReservationsPage />);
+    const r105 = await screen.findByTestId('reservation-row-R-105');
+    r105.focus();
+    await user.keyboard('{Enter}');
+    const panel = screen.getByRole('region', { name: '선택한 예약' });
+    expect(panel).toHaveTextContent('R-105');
+    expect(panel).toHaveTextContent('취소된 예약은 변경할 수 없습니다.');
+    expect(r105).toHaveAttribute('aria-selected', 'true');
   });
 
   it('save disabled without reason', async () => {

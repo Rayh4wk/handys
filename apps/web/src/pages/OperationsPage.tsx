@@ -85,11 +85,7 @@ export default function OperationsPage() {
   return (
     <main className="page">
       <div className="page-head">
-        <h1>현장 운영 — 청소 일정 점검</h1>
-        <p className="page-lead">
-          체크아웃과 청소 시작 시각을 비교한 결과입니다. 조치가 필요한 건을 선택해 이력을 확인하고
-          청소 일정을 수정하세요.
-        </p>
+        <h1>청소 일정 점검</h1>
       </div>
 
       <div className="summary" role="group" aria-label="판정 요약">
@@ -127,7 +123,6 @@ export default function OperationsPage() {
           </select>
         </label>
         {all && <span className="muted tnum">{rows.length}건</span>}
-        <span className="toolbar-note muted">우선순위: 불일치, 확인 필요, 판정 불가 순</span>
       </div>
 
       {q.isPending && <p className="muted state-line">점검 결과를 불러오는 중…</p>}
@@ -151,12 +146,9 @@ export default function OperationsPage() {
                 {rows.length === 0 && (
                   <tr className="row-empty">
                     <td colSpan={6} className="empty">
-                      해당하는 예약이 없습니다.
-                      {filter === 'ACTION_REQUIRED' && (
-                        <span className="empty-sub">
-                          조치가 필요한 예약이 없습니다. 새 변경이 생기면 자동으로 표시됩니다.
-                        </span>
-                      )}
+                      {filter === 'ACTION_REQUIRED'
+                        ? '조치가 필요한 예약이 없습니다.'
+                        : '해당하는 예약이 없습니다.'}
                     </td>
                   </tr>
                 )}
@@ -217,10 +209,7 @@ export default function OperationsPage() {
           {selected ? (
             <DetailPanel key={selected.id} reservation={selected} />
           ) : (
-            <aside className="detail-placeholder">
-              <p>목록에서 예약을 선택하세요.</p>
-              <p className="muted">판정 근거와 변경 이력을 확인하고 청소 일정을 바로 수정할 수 있습니다.</p>
-            </aside>
+            <aside className="detail-placeholder">목록에서 예약을 선택하세요.</aside>
           )}
         </div>
       )}
@@ -345,10 +334,9 @@ function CleaningForm({
   return (
     <form className="editor" onSubmit={onSubmit} aria-label={`${reservation.id} 청소 일정 수정`}>
       <h3>청소 일정 수정</h3>
-      <p className="editor-hint muted">저장하면 체크아웃 시각과 다시 비교해 판정을 갱신합니다.</p>
       <div className="editor-fields">
         <label className="field">
-          <span className="field-label">청소 시작 (KST)</span>
+          <span className="field-label">청소 시작</span>
           <input
             type="datetime-local"
             data-testid="cleaning-input"
@@ -365,7 +353,6 @@ function CleaningForm({
             type="text"
             data-testid="cleaning-reason"
             value={reason}
-            placeholder="예: 체크아웃 지연 반영"
             onChange={(e) => setReason(e.target.value)}
           />
         </label>

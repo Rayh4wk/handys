@@ -1,10 +1,10 @@
 // Captures the demo story (GOAL.md §14) at 1280px and 390px for visual review.
 //
 //   npm run setup                      # fresh seed (R-101: checkout 11:00, cleaning 11:30)
-//   PORT=3200 API_PORT=3200 npm run dev
+//   npm run dev
 //   npm run screenshots                # → docs/screenshots/*.png
 //
-// Env: SCREENSHOT_URL (default http://localhost:5173), SCREENSHOT_DIR (default docs/screenshots).
+// Env: SCREENSHOT_URL (default http://localhost:5300), SCREENSHOT_DIR (default docs/screenshots).
 // It changes R-101 through the UI, so run `npm run setup` again before re-capturing.
 /* global document */
 import { chromium } from '@playwright/test';
@@ -13,7 +13,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const BASE = process.env.SCREENSHOT_URL ?? 'http://localhost:5173';
+const BASE = process.env.SCREENSHOT_URL ?? 'http://localhost:5300';
 const OUT = resolve(root, process.env.SCREENSHOT_DIR ?? 'docs/screenshots');
 const WIDTHS = { desktop: { width: 1280, height: 800 }, mobile: { width: 390, height: 844 } };
 
@@ -36,10 +36,11 @@ async function shoot(page, name) {
   await page.setViewportSize(WIDTHS.desktop);
 }
 
-async function login(role) {
+async function login(role, { demo = false } = {}) {
   const context = await browser.newContext({ viewport: WIDTHS.desktop, locale: 'ko-KR' });
   const page = await context.newPage();
-  await page.goto(`${BASE}/login`);
+  // ?demo=1 shows the demo-only disconnect toggle (needed for the last step only).
+  await page.goto(`${BASE}/login${demo ? '?demo=1' : ''}`);
   await page.getByTestId('login-username').fill(role);
   await page.getByTestId('login-password').fill('demo1234');
   await page.getByTestId('login-submit').click();
@@ -72,7 +73,7 @@ try {
   await A.page.locator('[data-testid="change-result"][data-result="CONFLICT"]').waitFor();
   await shoot(A.page, '04-reservations-conflict');
 
-  const B = await login('ops');
+  const B = await login('ops', { demo: true });
   await B.page.getByTestId('inspection-row-R-101').waitFor();
   await shoot(B.page, '05-operations-action-required');
 

@@ -3,7 +3,10 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ApiError } from './api/client';
 import App from './App';
+import { captureDemoFlag } from './lib/demo';
 import './styles.css';
+
+captureDemoFlag();
 
 const queryClient = new QueryClient({
   defaultOptions: {

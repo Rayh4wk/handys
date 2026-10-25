@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { ROLE_LABEL } from '../api/types';
 import { useAuth } from '../auth/authContext';
+import { isDemoMode } from '../lib/demo';
 import { formatKstClock } from '../lib/kst';
 import { useRealtime, type RealtimeState } from '../realtime/realtimeContext';
 
@@ -44,14 +45,16 @@ export default function Header() {
               {lastUpdatedAt ? formatKstClock(lastUpdatedAt.toISOString()) : '-'}
             </span>
           </span>
-          <button
-            type="button"
-            className={`btn-ghost btn-small ${paused ? 'btn-resume' : ''}`}
-            data-testid="sse-toggle"
-            onClick={paused ? resume : pause}
-          >
-            {paused ? '다시 연결' : '실시간 연결 끊기(시연용)'}
-          </button>
+          {isDemoMode() && (
+            <button
+              type="button"
+              className={`btn-ghost btn-small ${paused ? 'btn-resume' : ''}`}
+              data-testid="sse-toggle"
+              onClick={paused ? resume : pause}
+            >
+              {paused ? '다시 연결' : '연결 끊기'}
+            </button>
+          )}
         </div>
         <div className="account">
           <span className="account-name">{me.displayName}</span>
