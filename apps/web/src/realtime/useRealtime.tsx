@@ -31,13 +31,38 @@ const TRACKED_KEYS = new Set(['reservations', 'inspection-results']);
 
 const RealtimeContext = createContext<RealtimeValue | null>(null);
 
+interface SseEvent {
+  type?: unknown;
+  reservationId?: unknown;
+}
+
 export function RealtimeProvider({ enabled, children }: { enabled: boolean; children: ReactNode }) {
   const queryClient = useQueryClient();
-  const [state, setState] = useState<RealtimeState>('disconnected');
   const [paused, setPaused] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [generation, setGeneration] = useState(0);
+  // State reported by the EventSource of a given generation. A newer generation (or a fresh
+  // enable) has not reported yet, so it is 'connecting' — no "disconnected" flash on start.
+  const [conn, setConn] = useState<{ generation: number; state: RealtimeState } | null>(null);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // On logout (enabled → false) forget pause/last-updated so the next login starts clean.
+  const [prevEnabled, setPrevEnabled] = useState(enabled);
+  if (prevEnabled !== enabled) {
+    setPrevEnabled(enabled);
+    if (!enabled) {
+      setPaused(false);
+      setLastUpdatedAt(null);
+      setConn(null);
+    }
+  }
+
+  const active = enabled && !paused;
+  const state: RealtimeState = !active
+    ? 'disconnected'
+    : conn && conn.generation === generation
+      ? conn.state
+      : 'connecting';
 
   // lastUpdatedAt: last successful fetch of reservations / inspection-results queries.
   useEffect(() => {
@@ -51,20 +76,17 @@ export function RealtimeProvider({ enabled, children }: { enabled: boolean; chil
   }, [queryClient]);
 
   useEffect(() => {
-    if (!enabled || paused) {
-      setState('disconnected');
-      return;
-    }
-    setState('connecting');
+    if (!active) return;
+    const report = (s: RealtimeState) => setConn({ generation, state: s });
     const es = new EventSource('/api/events');
     es.onopen = () => {
-      setState('open');
+      report('open');
       void queryClient.invalidateQueries();
     };
     es.onmessage = (ev: MessageEvent) => {
-      let data: any;
+      let data: SseEvent | null;
       try {
-        data = JSON.parse(ev.data);
+        data = JSON.parse(String(ev.data)) as SseEvent | null;
       } catch {
         return;
       }
@@ -79,7 +101,7 @@ export function RealtimeProvider({ enabled, children }: { enabled: boolean; chil
       // heartbeat and unknown types: ignored
     };
     es.onerror = () => {
-      setState('reconnecting');
+      report('reconnecting');
       // The browser auto-reconnects unless the source is CLOSED; then we recreate it ourselves.
       if (es.readyState === EventSource.CLOSED && !retryTimer.current) {
         retryTimer.current = setTimeout(() => {
@@ -96,7 +118,7 @@ export function RealtimeProvider({ enabled, children }: { enabled: boolean; chil
         retryTimer.current = null;
       }
     };
-  }, [enabled, paused, generation, queryClient]);
+  }, [active, generation, queryClient]);
 
   const pause = useCallback(() => setPaused(true), []);
   const resume = useCallback(() => {

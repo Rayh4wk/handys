@@ -2,9 +2,12 @@ import type { AuditLogView, InspectionStatus, Me, ReservationView } from './type
 
 export class ApiError extends Error {
   status: number;
-  body: any;
-  constructor(status: number, body: any) {
-    const msg = body && typeof body === 'object' && 'message' in body ? body.message : undefined;
+  body: unknown;
+  constructor(status: number, body: unknown) {
+    const msg =
+      body && typeof body === 'object' && 'message' in body
+        ? (body as { message: unknown }).message
+        : undefined;
     super(Array.isArray(msg) ? msg.join(', ') : String(msg ?? `HTTP ${status}`));
     this.name = 'ApiError';
     this.status = status;
@@ -20,7 +23,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
-  let data: any = null;
+  let data: unknown = null;
   if (text) {
     try {
       data = JSON.parse(text);

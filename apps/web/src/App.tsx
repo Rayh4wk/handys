@@ -5,6 +5,8 @@ import { AuthProvider, useAuth } from './auth/AuthProvider';
 import LoginPage from './auth/LoginPage';
 import RequireRole from './auth/RequireRole';
 import Header from './components/Header';
+import OperationsPage from './pages/OperationsPage';
+import ReservationsPage from './pages/ReservationsPage';
 import { RealtimeProvider } from './realtime/useRealtime';
 
 function AuthedRealtime({ children }: { children: ReactNode }) {
@@ -30,9 +32,7 @@ export default function App() {
               path="/reservations"
               element={
                 <RequireRole role="RESERVATION_AGENT">
-                  <main className="page">
-                    <h1>예약·고객 응대 — 체크아웃 변경</h1>
-                  </main>
+                  <ReservationsPage />
                 </RequireRole>
               }
             />
@@ -40,9 +40,7 @@ export default function App() {
               path="/operations"
               element={
                 <RequireRole role="OPERATIONS_MANAGER">
-                  <main className="page">
-                    <h1>현장 운영 — 청소 일정 점검</h1>
-                  </main>
+                  <OperationsPage />
                 </RequireRole>
               }
             />

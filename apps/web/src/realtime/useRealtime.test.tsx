@@ -1,6 +1,6 @@
 import { act, render } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { RealtimeProvider, useRealtime } from './useRealtime';
 
 class FakeEventSource {
@@ -33,9 +33,15 @@ class FakeEventSource {
 }
 
 let latest: ReturnType<typeof useRealtime> | null = null;
+let seenStates: string[] = [];
 function Probe() {
-  latest = useRealtime();
-  return <span data-testid="state">{latest.state}</span>;
+  const value = useRealtime();
+  // Record every committed value (effects, not render, so the probe stays pure).
+  useEffect(() => {
+    latest = value;
+    seenStates.push(value.state);
+  });
+  return <span data-testid="state">{value.state}</span>;
 }
 
 function setup() {
@@ -55,6 +61,7 @@ const current = () => FakeEventSource.instances[FakeEventSource.instances.length
 beforeEach(() => {
   FakeEventSource.instances = [];
   latest = null;
+  seenStates = [];
   vi.stubGlobal('EventSource', FakeEventSource);
 });
 
@@ -89,7 +96,7 @@ describe('RealtimeProvider', () => {
     expect(keys).toContainEqual(['reservations']);
     expect(keys).toContainEqual(['inspection-results']);
     expect(keys).toContainEqual(['audit-logs', 'R-101']);
-    expect((window as any).__lastSseEvent.data).toEqual({
+    expect(window.__lastSseEvent?.data).toEqual({
       type: 'reservation.updated',
       reservationId: 'R-101',
       version: 4,
@@ -149,5 +156,54 @@ describe('RealtimeProvider', () => {
       await queryClient.fetchQuery({ queryKey: ['reservations'], queryFn: async () => [] });
     });
     expect(latest!.lastUpdatedAt).toBeInstanceOf(Date);
+  });
+
+  it('starts in connecting (never flashes disconnected) when enabled', () => {
+    setup();
+    expect(seenStates[0]).toBe('connecting');
+    expect(seenStates).not.toContain('disconnected');
+  });
+
+  it('starts disconnected when not enabled', () => {
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RealtimeProvider enabled={false}>
+          <Probe />
+        </RealtimeProvider>
+      </QueryClientProvider>,
+    );
+    expect(seenStates[0]).toBe('disconnected');
+    expect(FakeEventSource.instances).toHaveLength(0);
+  });
+
+  it('resets paused and lastUpdatedAt when disabled (logout) so next login connects', async () => {
+    const queryClient = new QueryClient();
+    const tree = (enabled: boolean) => (
+      <QueryClientProvider client={queryClient}>
+        <RealtimeProvider enabled={enabled}>
+          <Probe />
+        </RealtimeProvider>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(tree(true));
+    await act(async () => {
+      await queryClient.fetchQuery({ queryKey: ['reservations'], queryFn: async () => [] });
+    });
+    act(() => current().emitOpen());
+    act(() => latest!.pause());
+    expect(latest!.paused).toBe(true);
+    expect(latest!.lastUpdatedAt).not.toBeNull();
+
+    rerender(tree(false));
+    expect(latest!.paused).toBe(false);
+    expect(latest!.lastUpdatedAt).toBeNull();
+    expect(latest!.state).toBe('disconnected');
+
+    const before = FakeEventSource.instances.length;
+    rerender(tree(true));
+    expect(FakeEventSource.instances.length).toBe(before + 1);
+    expect(current().closed).toBe(false);
+    expect(latest!.state).toBe('connecting');
   });
 });

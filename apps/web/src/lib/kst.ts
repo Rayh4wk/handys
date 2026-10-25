@@ -37,6 +37,12 @@ export function formatKstDateTime(iso: string): string {
   return `${k.y}-${k.mo}-${k.d} ${k.h}:${k.mi}:${k.s}`;
 }
 
+/** "HH:mm:ss" in KST */
+export function formatKstClock(iso: string): string {
+  const k = parts(iso);
+  return `${k.h}:${k.mi}:${k.s}`;
+}
+
 /** ISO -> "YYYY-MM-DDTHH:mm" (datetime-local value, KST) */
 export function isoToKstInput(iso: string | null): string {
   if (!iso) return '';

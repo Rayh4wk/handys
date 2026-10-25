@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatKst,
+  formatKstClock,
   formatKstDateTime,
   formatKstTime,
   isoToKstInput,
@@ -26,6 +27,10 @@ describe('kst', () => {
   });
   it('formatKstDateTime', () => {
     expect(formatKstDateTime('2026-10-26T04:00:05.000Z')).toBe('2026-10-26 13:00:05');
+  });
+  it('formatKstClock', () => {
+    expect(formatKstClock('2026-10-26T04:00:05.000Z')).toBe('13:00:05');
+    expect(formatKstClock('2026-10-25T15:59:59.000Z')).toBe('00:59:59');
   });
   it('round-trips across the date boundary', () => {
     expect(isoToKstInput(kstInputToIso('2026-10-26T00:15'))).toBe('2026-10-26T00:15');

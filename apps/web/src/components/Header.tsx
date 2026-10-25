@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { ROLE_LABEL } from '../api/types';
 import { useAuth } from '../auth/AuthProvider';
-import { formatKstDateTime } from '../lib/kst';
+import { formatKstClock } from '../lib/kst';
 import { useRealtime, type RealtimeState } from '../realtime/useRealtime';
 
 const STATE_LABEL: Record<RealtimeState, string> = {
@@ -36,7 +36,7 @@ export default function Header() {
           <span className="muted">
             마지막 갱신{' '}
             <span data-testid="last-updated">
-              {lastUpdatedAt ? formatKstDateTime(lastUpdatedAt.toISOString()).slice(11) : '-'}
+              {lastUpdatedAt ? formatKstClock(lastUpdatedAt.toISOString()) : '-'}
             </span>
           </span>
           <button type="button" data-testid="sse-toggle" onClick={paused ? resume : pause}>

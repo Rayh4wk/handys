@@ -31,15 +31,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     staleTime: Infinity,
   });
 
-  // Any 401 from another query means the session is gone.
+  // Any 401 from another query or a mutation means the session is gone.
   useEffect(() => {
-    return queryClient.getQueryCache().subscribe((event) => {
-      if (event.type !== 'updated' || event.action.type !== 'error') return;
-      const err = event.action.error;
+    const onError = (err: unknown) => {
       if (err instanceof ApiError && err.status === 401) {
         queryClient.setQueryData(queryKeys.me, null);
       }
+    };
+    const unsubQueries = queryClient.getQueryCache().subscribe((event) => {
+      if (event.type === 'updated' && event.action.type === 'error') onError(event.action.error);
     });
+    const unsubMutations = queryClient.getMutationCache().subscribe((event) => {
+      if (event.type === 'updated' && event.action.type === 'error') onError(event.action.error);
+    });
+    return () => {
+      unsubQueries();
+      unsubMutations();
+    };
   }, [queryClient]);
 
   const login = useCallback(
