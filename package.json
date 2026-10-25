@@ -1,12 +1,14 @@
 {
   "name": "handys",
   "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
-    "install:all": "npm install --prefix server && npm install --prefix web && ([ -d e2e ] && npm install --prefix e2e || true)",
-    "build": "npm run build --prefix web && npm run build --prefix server",
-    "test": "npm test --prefix server && npm test --prefix web",
-    "test:int": "npm run test:int --prefix server",
-    "e2e": "npm test --prefix e2e",
-    "start": "npm run start:prod --prefix server"
+    "build": "npm run build -w apps/web && npm run build -w apps/server",
+    "test": "npm test -w apps/server && npm test -w apps/web",
+    "test:int": "npm run test:int -w apps/server",
+    "e2e": "npm test -w apps/e2e",
+    "start": "npm run start:prod -w apps/server"
   }
 }
