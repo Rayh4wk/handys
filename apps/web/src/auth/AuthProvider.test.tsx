@@ -2,7 +2,8 @@ import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-q
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ApiError, api } from '../api/client';
-import { AuthProvider, useAuth } from './AuthProvider';
+import { AuthProvider } from './AuthProvider';
+import { useAuth } from './authContext';
 
 vi.mock('../api/client', async (importOriginal) => {
   const orig = await importOriginal<typeof import('../api/client')>();

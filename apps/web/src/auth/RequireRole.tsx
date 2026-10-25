@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { ROLE_HOME, ROLE_LABEL, type Role } from '../api/types';
-import { useAuth } from './AuthProvider';
+import { useAuth } from './authContext';
 
 export default function RequireRole({ role, children }: { role: Role; children: ReactNode }) {
   const { me, loading } = useAuth();

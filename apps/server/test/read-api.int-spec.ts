@@ -3,6 +3,13 @@ import request from 'supertest';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { createTestApp, loginAs, resetDb } from './helpers';
 
+interface Row {
+  id: string;
+  checkoutAt: string | null;
+  inspection: { status: string; reasonText: string; checkedAt: string };
+  cleaningTask: unknown;
+}
+
 describe('read api', () => {
   let app: INestApplication;
   let prisma: PrismaService;
@@ -25,7 +32,7 @@ describe('read api', () => {
   it.each(['ops', 'agent'] as const)('lists judged reservations for %s', async (who) => {
     const a = await loginAs(app, who);
     const res = await a.get('/api/reservations').expect(200);
-    const rows = res.body as any[];
+    const rows = res.body as Row[];
     expect(rows.map((r) => r.id)).toEqual(['R-101', 'R-102', 'R-103', 'R-104', 'R-105', 'R-106']);
     expect(rows.map((r) => r.inspection.status)).toEqual([
       'NORMAL', 'NORMAL', 'NEEDS_CHECK', 'UNDETERMINED', 'EXCLUDED', 'NORMAL',
@@ -46,7 +53,7 @@ describe('read api', () => {
   it('filters by status', async () => {
     const a = await loginAs(app, 'ops');
     const res = await a.get('/api/inspection-results?status=NEEDS_CHECK').expect(200);
-    expect((res.body as any[]).map((r) => r.id)).toEqual(['R-103']);
+    expect((res.body as Array<{ id: string }>).map((r) => r.id)).toEqual(['R-103']);
     await a.get('/api/inspection-results?status=BOGUS').expect(400);
   });
 
@@ -58,7 +65,7 @@ describe('read api', () => {
     }
     expect(await prisma.inspectionResult.count()).toBe(6);
     const list = await a.get('/api/reservations').expect(200);
-    expect(list.body.map((r: any) => r.inspection.status)).toEqual([
+    expect(list.body.map((r: Row) => r.inspection.status)).toEqual([
       'NORMAL', 'NORMAL', 'NEEDS_CHECK', 'UNDETERMINED', 'EXCLUDED', 'NORMAL',
     ]);
   });

@@ -1,8 +1,8 @@
 import { useNavigate } from 'react-router-dom';
 import { ROLE_LABEL } from '../api/types';
-import { useAuth } from '../auth/AuthProvider';
+import { useAuth } from '../auth/authContext';
 import { formatKstClock } from '../lib/kst';
-import { useRealtime, type RealtimeState } from '../realtime/useRealtime';
+import { useRealtime, type RealtimeState } from '../realtime/realtimeContext';
 
 const STATE_LABEL: Record<RealtimeState, string> = {
   open: '연결됨',

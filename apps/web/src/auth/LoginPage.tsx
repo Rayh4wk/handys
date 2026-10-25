@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { ApiError } from '../api/client';
 import { ROLE_HOME } from '../api/types';
-import { useAuth } from './AuthProvider';
+import { useAuth } from './authContext';
 
 export default function LoginPage() {
   const { me, loading, login } = useAuth();

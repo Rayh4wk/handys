@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { ROLE_HOME } from './api/types';
-import { AuthProvider, useAuth } from './auth/AuthProvider';
+import { AuthProvider } from './auth/AuthProvider';
+import { useAuth } from './auth/authContext';
 import LoginPage from './auth/LoginPage';
 import RequireRole from './auth/RequireRole';
 import Header from './components/Header';

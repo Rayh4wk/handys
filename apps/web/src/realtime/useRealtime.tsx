@@ -1,24 +1,13 @@
 import { useQueryClient } from '@tanstack/react-query';
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
-
-export type RealtimeState = 'connecting' | 'open' | 'reconnecting' | 'disconnected';
-
-export interface RealtimeValue {
-  state: RealtimeState;
-  lastUpdatedAt: Date | null;
-  paused: boolean;
-  pause(): void;
-  resume(): void;
-}
+import { RealtimeContext, type RealtimeState, type RealtimeValue } from './realtimeContext';
 
 declare global {
   interface Window {
@@ -28,8 +17,6 @@ declare global {
 
 const RECONNECT_DELAY_MS = 3000;
 const TRACKED_KEYS = new Set(['reservations', 'inspection-results']);
-
-const RealtimeContext = createContext<RealtimeValue | null>(null);
 
 interface SseEvent {
   type?: unknown;
@@ -132,10 +119,4 @@ export function RealtimeProvider({ enabled, children }: { enabled: boolean; chil
   );
 
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;
-}
-
-export function useRealtime(): RealtimeValue {
-  const ctx = useContext(RealtimeContext);
-  if (!ctx) throw new Error('useRealtime must be used within RealtimeProvider');
-  return ctx;
 }
