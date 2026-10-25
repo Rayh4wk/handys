@@ -5,7 +5,9 @@ import { STATUS_LABEL, type InspectionStatus, type ReservationView } from '../ap
 import AuditLogList from '../components/AuditLogList';
 import SaveNoticeView from '../components/SaveNoticeView';
 import StatusBadge from '../components/StatusBadge';
+import TimeCompare from '../components/TimeCompare';
 import { isoToKstInput, kstInputToIso } from '../lib/kst';
+import { scrollIntoViewOnNarrow } from '../lib/scroll';
 import {
   ACTION_REQUIRED,
   STATUS_ORDER,
@@ -63,27 +65,54 @@ export default function OperationsPage() {
   // Looked up in the full list so the panel stays open when the row leaves the filter.
   const selected = all?.find((r) => r.id === selectedId) ?? null;
 
+  const actionTotal = counts.CONFLICT + counts.NEEDS_CHECK + counts.UNDETERMINED;
+  const summaryButton = (st: InspectionStatus) => (
+    <button
+      type="button"
+      key={st}
+      className={`summary-item summary-${st} ${counts[st] > 0 ? 'has-items' : 'is-zero'} ${
+        filter === st ? 'active' : ''
+      }`}
+      data-testid={`summary-${st}`}
+      aria-pressed={filter === st}
+      onClick={() => setFilter(st)}
+    >
+      <span className="summary-label">{STATUS_LABEL[st]}</span>
+      <span className="summary-count">{counts[st]}</span>
+    </button>
+  );
+
   return (
     <main className="page">
-      <h1>현장 운영 — 청소 일정 점검</h1>
+      <div className="page-head">
+        <h1>현장 운영 — 청소 일정 점검</h1>
+        <p className="page-lead">
+          체크아웃과 청소 시작 시각을 비교한 결과입니다. 조치가 필요한 건을 선택해 이력을 확인하고
+          청소 일정을 수정하세요.
+        </p>
+      </div>
 
       <div className="summary" role="group" aria-label="판정 요약">
-        {STATUS_ORDER.map((s) => (
-          <button
-            type="button"
-            key={s}
-            className={`summary-item summary-${s} ${filter === s ? 'active' : ''}`}
-            data-testid={`summary-${s}`}
-            onClick={() => setFilter(s)}
-          >
-            <span className="summary-label">{STATUS_LABEL[s]}</span>
-            <span className="summary-count">{counts[s]}</span>
-          </button>
-        ))}
+        <div
+          className={`summary-group summary-group-action ${
+            filter === 'ACTION_REQUIRED' ? 'active' : ''
+          }`}
+        >
+          <span className="summary-group-label">
+            조치 필요 <b className="tnum">{actionTotal}</b>
+          </span>
+          <div className="summary-items">
+            {(['CONFLICT', 'NEEDS_CHECK', 'UNDETERMINED'] as const).map(summaryButton)}
+          </div>
+        </div>
+        <div className="summary-group summary-group-rest">
+          <span className="summary-group-label">조치 불필요</span>
+          <div className="summary-items">{(['NORMAL', 'EXCLUDED'] as const).map(summaryButton)}</div>
+        </div>
       </div>
 
       <div className="toolbar">
-        <label>
+        <label className="toolbar-filter">
           보기{' '}
           <select
             data-testid="status-filter"
@@ -97,41 +126,51 @@ export default function OperationsPage() {
             ))}
           </select>
         </label>
-        {all && <span className="muted">{rows.length}건</span>}
+        {all && <span className="muted tnum">{rows.length}건</span>}
+        <span className="toolbar-note muted">우선순위: 불일치, 확인 필요, 판정 불가 순</span>
       </div>
 
-      {q.isPending && <p className="muted">점검 결과를 불러오는 중…</p>}
-      {q.isError && <p className="error">점검 결과를 불러오지 못했습니다.</p>}
+      {q.isPending && <p className="muted state-line">점검 결과를 불러오는 중…</p>}
+      {q.isError && <p className="error state-line">점검 결과를 불러오지 못했습니다.</p>}
 
-      <div className="split">
-        {all && (
+      {all && (
+        <div className="split">
           <div className="table-wrap card flush">
-            <table className="data-table">
+            <table className="data-table table-inspections">
               <thead>
                 <tr>
                   <th>예약 번호</th>
                   <th>객실</th>
-                  <th>체크아웃 예정</th>
-                  <th>청소 시작 예정</th>
+                  <th className="th-time">체크아웃 예정</th>
+                  <th className="th-time">청소 시작 예정</th>
                   <th>판정</th>
                   <th>근거</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.length === 0 && (
-                  <tr>
+                  <tr className="row-empty">
                     <td colSpan={6} className="empty">
                       해당하는 예약이 없습니다.
+                      {filter === 'ACTION_REQUIRED' && (
+                        <span className="empty-sub">
+                          조치가 필요한 예약이 없습니다. 새 변경이 생기면 자동으로 표시됩니다.
+                        </span>
+                      )}
                     </td>
                   </tr>
                 )}
                 {rows.map((r) => {
                   const cleaning = cleaningText(r);
+                  const status = statusOf(r);
+                  const clash = status === 'CONFLICT';
                   return (
                     <tr
                       key={r.id}
                       data-testid={`inspection-row-${r.id}`}
-                      className={`clickable ${r.id === selectedId ? 'selected' : ''}`}
+                      className={`clickable row-${status ?? 'UNKNOWN'} ${
+                        r.id === selectedId ? 'selected' : ''
+                      }`}
                       aria-selected={r.id === selectedId}
                       tabIndex={0}
                       onClick={() => setSelectedId(r.id)}
@@ -142,24 +181,49 @@ export default function OperationsPage() {
                         }
                       }}
                     >
-                      <td className="mono">{r.id}</td>
-                      <td>{r.roomId}</td>
-                      <td className={r.checkoutAt ? 'mono' : 'missing'}>{checkoutText(r)}</td>
-                      <td className={/^\d/.test(cleaning) ? 'mono' : 'missing'}>{cleaning}</td>
-                      <td>
-                        <StatusBadge status={statusOf(r)} />
+                      <td className="cell-id" data-label="예약 번호">
+                        {r.id}
                       </td>
-                      <td className="reason">{r.inspection?.reasonText ?? '-'}</td>
+                      <td data-label="객실">{r.roomId}</td>
+                      <td
+                        className={r.checkoutAt ? 'cell-time cell-checkout' : 'missing'}
+                        data-label="체크아웃 예정"
+                      >
+                        {checkoutText(r)}
+                      </td>
+                      <td
+                        className={
+                          /^\d/.test(cleaning)
+                            ? `cell-time cell-cleaning ${clash ? 'clash' : ''}`
+                            : 'missing'
+                        }
+                        data-label="청소 시작 예정"
+                      >
+                        {cleaning}
+                      </td>
+                      <td className="cell-status" data-label="판정">
+                        <StatusBadge status={status} />
+                      </td>
+                      <td className="reason" data-label="근거">
+                        {r.inspection?.reasonText ?? '-'}
+                      </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
           </div>
-        )}
 
-        {selected && <DetailPanel key={selected.id} reservation={selected} />}
-      </div>
+          {selected ? (
+            <DetailPanel key={selected.id} reservation={selected} />
+          ) : (
+            <aside className="detail-placeholder">
+              <p>목록에서 예약을 선택하세요.</p>
+              <p className="muted">판정 근거와 변경 이력을 확인하고 청소 일정을 바로 수정할 수 있습니다.</p>
+            </aside>
+          )}
+        </div>
+      )}
     </main>
   );
 }
@@ -169,11 +233,25 @@ function DetailPanel({ reservation }: { reservation: ReservationView }) {
   const task = activeCleaning(reservation);
   const editable = !!task && status !== 'EXCLUDED';
   return (
-    <aside className="card detail detail-side" data-testid="detail-panel">
+    <aside
+      className="card detail detail-side"
+      data-testid="detail-panel"
+      ref={scrollIntoViewOnNarrow}
+    >
       <div className="detail-head">
         <h2>{reservation.id}</h2>
         <StatusBadge status={status} />
       </div>
+      {reservation.inspection?.reasonText && (
+        <p className={`detail-reason reason-${status ?? 'UNKNOWN'}`}>
+          {reservation.inspection.reasonText}
+        </p>
+      )}
+      <TimeCompare
+        checkoutAt={reservation.checkoutAt}
+        cleaningAt={task?.scheduledStartAt ?? null}
+        status={status}
+      />
       <dl className="facts">
         <dt>객실</dt>
         <dd>{reservation.roomId}</dd>
@@ -183,16 +261,18 @@ function DetailPanel({ reservation }: { reservation: ReservationView }) {
           {reservation.status === 'CANCELLED' && <span className="tag-cancelled">취소</span>}
         </dd>
         <dt>체크아웃 예정</dt>
-        <dd>{checkoutText(reservation)}</dd>
+        <dd className={reservation.checkoutAt ? 'tnum strong' : 'missing'}>
+          {checkoutText(reservation)}
+        </dd>
         <dt>청소 시작 예정</dt>
-        <dd>{cleaningText(reservation)}</dd>
-        <dt>근거</dt>
-        <dd>{reservation.inspection?.reasonText ?? '-'}</dd>
+        <dd className={task?.scheduledStartAt ? 'tnum strong' : 'missing'}>
+          {cleaningText(reservation)}
+        </dd>
       </dl>
 
       {editable && task && <CleaningForm reservation={reservation} task={task} />}
 
-      <h3>변경 이력</h3>
+      <h3 className="section-title">변경 이력</h3>
       <AuditLogList reservationId={reservation.id} />
     </aside>
   );
@@ -265,9 +345,10 @@ function CleaningForm({
   return (
     <form className="editor" onSubmit={onSubmit} aria-label={`${reservation.id} 청소 일정 수정`}>
       <h3>청소 일정 수정</h3>
+      <p className="editor-hint muted">저장하면 체크아웃 시각과 다시 비교해 판정을 갱신합니다.</p>
       <div className="editor-fields">
-        <label>
-          청소 시작 (KST)
+        <label className="field">
+          <span className="field-label">청소 시작 (KST)</span>
           <input
             type="datetime-local"
             data-testid="cleaning-input"
@@ -276,8 +357,10 @@ function CleaningForm({
             required
           />
         </label>
-        <label className="grow">
-          메모(사유) <span className="optional">선택</span>
+        <label className="field grow">
+          <span className="field-label">
+            메모(사유) <span className="optional">선택</span>
+          </span>
           <input
             type="text"
             data-testid="cleaning-reason"

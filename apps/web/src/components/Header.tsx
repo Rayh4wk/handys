@@ -27,26 +27,36 @@ export default function Header() {
   return (
     <header className="app-header">
       <div className="header-row">
-        <div className="brand">청소 일정 점검</div>
+        <div className="brand">
+          <span className="brand-mark" aria-hidden />
+          청소 일정 점검
+        </div>
         <div className="realtime">
-          <span className={`sse-dot sse-${state}`} aria-hidden />
-          <span data-testid="sse-state" data-state={state}>
-            {STATE_LABEL[state]}
+          <span className={`conn conn-${state}`}>
+            <span className={`sse-dot sse-${state}`} aria-hidden />
+            <span data-testid="sse-state" data-state={state}>
+              {STATE_LABEL[state]}
+            </span>
           </span>
-          <span className="muted">
+          <span className="last-updated">
             마지막 갱신{' '}
-            <span data-testid="last-updated">
+            <span className="tnum" data-testid="last-updated">
               {lastUpdatedAt ? formatKstClock(lastUpdatedAt.toISOString()) : '-'}
             </span>
           </span>
-          <button type="button" data-testid="sse-toggle" onClick={paused ? resume : pause}>
+          <button
+            type="button"
+            className={`btn-ghost btn-small ${paused ? 'btn-resume' : ''}`}
+            data-testid="sse-toggle"
+            onClick={paused ? resume : pause}
+          >
             {paused ? '다시 연결' : '실시간 연결 끊기(시연용)'}
           </button>
         </div>
         <div className="account">
-          <span>{me.displayName}</span>
+          <span className="account-name">{me.displayName}</span>
           <span className={`role-badge role-${me.role}`}>{ROLE_LABEL[me.role]}</span>
-          <button type="button" data-testid="logout" onClick={onLogout}>
+          <button type="button" className="btn-small" data-testid="logout" onClick={onLogout}>
             로그아웃
           </button>
         </div>

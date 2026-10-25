@@ -5,8 +5,11 @@ import type { InspectionStatus, ReservationView } from '../api/types';
 import AuditLogList from '../components/AuditLogList';
 import SaveNoticeView from '../components/SaveNoticeView';
 import StatusBadge from '../components/StatusBadge';
+import TimeCompare from '../components/TimeCompare';
 import { isoToKstInput, kstInputToIso } from '../lib/kst';
+import { scrollIntoViewOnNarrow } from '../lib/scroll';
 import {
+  activeCleaning,
   applyServerView,
   byId,
   checkoutText,
@@ -25,6 +28,15 @@ const GUIDANCE: Record<InspectionStatus, string> = {
   NEEDS_CHECK: '대응하는 퇴실 청소 작업이 없습니다. 운영 담당자의 확인이 필요합니다.',
   UNDETERMINED: '판정에 필요한 정보가 없습니다. 운영 담당자의 확인이 필요합니다.',
   EXCLUDED: '점검 대상에서 제외된 예약입니다.',
+};
+
+/** Headline of the judgment block (CONFLICT uses the fixed "청소 일정 조정 필요"). */
+const VERDICT: Record<InspectionStatus, string> = {
+  CONFLICT: '청소 일정 조정 필요',
+  NORMAL: '청소 일정 이상 없음',
+  NEEDS_CHECK: '운영 담당자 확인 필요',
+  UNDETERMINED: '운영 담당자 확인 필요',
+  EXCLUDED: '점검 대상 아님',
 };
 
 interface ChangeResult {
@@ -51,96 +63,154 @@ export default function ReservationsPage() {
 
   return (
     <main className="page">
-      <h1>예약·고객 응대</h1>
-      <p className="muted page-lead">
-        고객 요청에 따라 체크아웃 시각을 변경합니다. 저장하면 청소 일정과의 충돌 여부를 바로
-        확인할 수 있습니다.
-      </p>
+      <div className="page-head">
+        <h1>예약·고객 응대</h1>
+        <p className="page-lead">
+          고객 요청에 따라 체크아웃 시각을 변경합니다. 저장하면 청소 일정과의 충돌 여부를 바로
+          확인할 수 있습니다.
+        </p>
+      </div>
 
-      {q.isPending && <p className="muted">예약 목록을 불러오는 중…</p>}
-      {q.isError && <p className="error">예약 목록을 불러오지 못했습니다.</p>}
+      {q.isPending && <p className="muted state-line">예약 목록을 불러오는 중…</p>}
+      {q.isError && <p className="error state-line">예약 목록을 불러오지 못했습니다.</p>}
 
       {q.data && (
-        <div className="table-wrap card flush">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>예약 번호</th>
-                <th>객실</th>
-                <th>고객</th>
-                <th>체크아웃 예정</th>
-                <th>판정</th>
-                <th aria-label="작업" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => {
-                const cancelled = r.status === 'CANCELLED';
-                return (
-                  <tr
-                    key={r.id}
-                    data-testid={`reservation-row-${r.id}`}
-                    className={r.id === selectedId ? 'selected' : undefined}
-                    aria-selected={r.id === selectedId}
-                    onClick={() => select(r.id)}
-                  >
-                    <td className="mono">{r.id}</td>
-                    <td>{r.roomId}</td>
-                    <td>
-                      {r.guestName}
-                      {cancelled && <span className="tag-cancelled">취소</span>}
-                    </td>
-                    <td className={r.checkoutAt ? 'mono' : 'missing'}>{checkoutText(r)}</td>
-                    <td>
-                      <StatusBadge status={statusOf(r)} />
-                    </td>
-                    <td className="actions">
-                      <button
-                        type="button"
-                        disabled={cancelled}
-                        title={cancelled ? '취소된 예약은 변경할 수 없습니다.' : undefined}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedId(r.id);
-                          setEditingId(r.id);
-                        }}
-                      >
-                        체크아웃 변경
-                      </button>
+        <div className="split">
+          <div className="table-wrap card flush">
+            <table className="data-table table-reservations">
+              <thead>
+                <tr>
+                  <th>예약 번호</th>
+                  <th>객실</th>
+                  <th>고객</th>
+                  <th>체크아웃 예정</th>
+                  <th>판정</th>
+                  <th aria-label="작업" />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="empty">
+                      표시할 예약이 없습니다.
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+                )}
+                {rows.map((r) => {
+                  const cancelled = r.status === 'CANCELLED';
+                  const status = statusOf(r);
+                  return (
+                    <tr
+                      key={r.id}
+                      data-testid={`reservation-row-${r.id}`}
+                      className={[
+                        `row-${status ?? 'UNKNOWN'}`,
+                        r.id === selectedId ? 'selected' : '',
+                        cancelled ? 'row-cancelled' : '',
+                      ].join(' ')}
+                      aria-selected={r.id === selectedId}
+                      onClick={() => select(r.id)}
+                    >
+                      <td className="cell-id" data-label="예약 번호">
+                        {r.id}
+                      </td>
+                      <td data-label="객실">{r.roomId}</td>
+                      <td className="cell-guest" data-label="고객">
+                        {r.guestName}
+                        {cancelled && <span className="tag-cancelled">취소</span>}
+                      </td>
+                      <td
+                        className={r.checkoutAt ? 'cell-time' : 'missing'}
+                        data-label="체크아웃 예정"
+                      >
+                        {checkoutText(r)}
+                      </td>
+                      <td className="cell-status" data-label="판정">
+                        <StatusBadge status={status} />
+                      </td>
+                      <td className="actions">
+                        <button
+                          type="button"
+                          className="btn-small"
+                          disabled={cancelled}
+                          title={cancelled ? '취소된 예약은 변경할 수 없습니다.' : undefined}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedId(r.id);
+                            setEditingId(r.id);
+                          }}
+                        >
+                          체크아웃 변경
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
 
-      {selected && (
-        <section className="card detail" aria-label="선택한 예약">
-          <h2>
-            {selected.id} <span className="muted">· {selected.roomId} · {selected.guestName}</span>
-          </h2>
-
-          {editingId === selected.id && selected.status !== 'CANCELLED' && (
-            <CheckoutEditor
+          {selected ? (
+            <section
+              className="card detail detail-side"
+              aria-label="선택한 예약"
+              ref={scrollIntoViewOnNarrow}
               key={selected.id}
-              reservation={selected}
-              onCancel={() => setEditingId(null)}
-              onSaved={(r) => {
-                setResult(r);
-                setEditingId(null);
-              }}
-            />
-          )}
+            >
+              <div className="detail-head">
+                <h2>{selected.id}</h2>
+                <StatusBadge status={statusOf(selected)} />
+              </div>
+              <dl className="facts">
+                <dt>객실</dt>
+                <dd>{selected.roomId}</dd>
+                <dt>고객</dt>
+                <dd>
+                  {selected.guestName}
+                  {selected.status === 'CANCELLED' && <span className="tag-cancelled">취소</span>}
+                </dd>
+                <dt>체크아웃 예정</dt>
+                <dd className={selected.checkoutAt ? 'tnum strong' : 'missing'}>
+                  {checkoutText(selected)}
+                </dd>
+              </dl>
 
-          {result && result.reservationId === selected.id && (
-            <ChangeResultPanel result={result} current={selected} />
-          )}
+              {selected.status === 'CANCELLED' ? (
+                <p className="inline-notice notice-muted">취소된 예약은 변경할 수 없습니다.</p>
+              ) : editingId === selected.id ? (
+                <CheckoutEditor
+                  key={selected.id}
+                  reservation={selected}
+                  onCancel={() => setEditingId(null)}
+                  onSaved={(r) => {
+                    setResult(r);
+                    setEditingId(null);
+                  }}
+                />
+              ) : (
+                <div className="detail-actions">
+                  <button type="button" className="primary" onClick={() => setEditingId(selected.id)}>
+                    체크아웃 변경
+                  </button>
+                </div>
+              )}
 
-          <h3>변경 이력</h3>
-          <AuditLogList reservationId={selected.id} />
-        </section>
+              {result && result.reservationId === selected.id && (
+                <ChangeResultPanel result={result} current={selected} />
+              )}
+
+              <h3 className="section-title">변경 이력</h3>
+              <AuditLogList reservationId={selected.id} />
+            </section>
+          ) : (
+            <aside className="detail-placeholder" aria-hidden={rows.length === 0}>
+              <p>
+                체크아웃을 바꿀 예약의 <strong>체크아웃 변경</strong>을 누르세요.
+              </p>
+              <p className="muted">저장하면 청소 일정과 맞는지 이 자리에 바로 표시됩니다.</p>
+            </aside>
+          )}
+        </div>
       )}
     </main>
   );
@@ -213,11 +283,11 @@ function CheckoutEditor({
   return (
     <form className="editor" data-testid="checkout-editor" onSubmit={onSubmit}>
       <div className="editor-current">
-        현재 체크아웃 예정 <strong>{checkoutText(reservation)}</strong>
+        현재 체크아웃 예정 <strong className="tnum">{checkoutText(reservation)}</strong>
       </div>
       <div className="editor-fields">
-        <label>
-          변경할 체크아웃 (KST)
+        <label className="field">
+          <span className="field-label">변경할 체크아웃 (KST)</span>
           <input
             type="datetime-local"
             data-testid="checkout-input"
@@ -226,8 +296,10 @@ function CheckoutEditor({
             required
           />
         </label>
-        <label className="grow">
-          변경 사유 <span className="required">필수</span>
+        <label className="field grow">
+          <span className="field-label">
+            변경 사유 <span className="required">필수</span>
+          </span>
           <input
             type="text"
             data-testid="checkout-reason"
@@ -246,6 +318,7 @@ function CheckoutEditor({
         <button type="button" onClick={onCancel} disabled={mutation.isPending}>
           취소
         </button>
+        {!reason.trim() && <span className="hint">변경 사유를 입력하면 저장할 수 있습니다.</span>}
       </div>
     </form>
   );
@@ -262,18 +335,33 @@ function ChangeResultPanel({ result, current }: { result: ChangeResult; current:
       data-result={status ?? 'UNKNOWN'}
       aria-live="polite"
     >
-      <div className="result-head">
+      <div className="result-done">
+        <span className="result-check" aria-hidden />
         <h3>예약 변경 완료</h3>
-        <StatusBadge status={status} />
       </div>
-      {conflict && <p className="result-alert">청소 일정 조정 필요</p>}
       <ul className="result-facts">
         <li>
-          체크아웃: {timeOrMissing(result.previousCheckoutAt)} → {timeOrMissing(result.newCheckoutAt)}
+          체크아웃: <span className="was">{timeOrMissing(result.previousCheckoutAt)}</span> →{' '}
+          <span className="now">{timeOrMissing(result.newCheckoutAt)}</span>
         </li>
         <li>기존 청소 시작: {cleaningTimeText(current)}</li>
       </ul>
-      {status && <p className="result-guidance">{GUIDANCE[status]}</p>}
+      <div className="result-judgment">
+        <div className="result-judgment-head">
+          {conflict ? (
+            <p className="result-alert">청소 일정 조정 필요</p>
+          ) : (
+            status && <p className="result-verdict">{VERDICT[status]}</p>
+          )}
+          <StatusBadge status={status} />
+        </div>
+        {status && <p className="result-guidance">{GUIDANCE[status]}</p>}
+        <TimeCompare
+          checkoutAt={current.checkoutAt}
+          cleaningAt={activeCleaning(current)?.scheduledStartAt ?? null}
+          status={status}
+        />
+      </div>
     </section>
   );
 }
