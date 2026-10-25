@@ -67,7 +67,8 @@ try {
   await shoot(A.page, '02-reservations');
 
   const row = A.page.getByTestId('reservation-row-R-101');
-  await row.getByRole('button', { name: '체크아웃 변경' }).click();
+  await row.click();
+  await A.page.getByRole('region', { name: '선택한 예약' }).getByRole('button', { name: '체크아웃 변경' }).click();
   const editor = A.page.getByTestId('checkout-editor');
   await editor.getByTestId('checkout-input').fill('2026-10-26T13:00');
   await editor.getByTestId('checkout-reason').fill('고객 요청');

@@ -9,6 +9,7 @@ import StatusBadge from '../components/StatusBadge';
 import TimeCompare from '../components/TimeCompare';
 import { formatKst, formatKstTime, isoToKstInput, kstInputToIso, sameKstDay } from '../lib/kst';
 import { focusRow, scrollIntoViewOnNarrow } from '../lib/scroll';
+import { useAnnouncer } from '../lib/useAnnouncer';
 import { useServerDraft } from '../lib/useServerDraft';
 import {
   MISSING,
@@ -43,11 +44,11 @@ interface ChangeResult {
 }
 
 /** The judgment line a screen reader hears for a change result (also when it later changes). */
-function resultAnnouncement(status: InspectionStatus | null): string {
-  if (!status) return '예약 변경 완료';
+function resultAnnouncement(id: string, status: InspectionStatus | null): string {
+  if (!status) return `${id} 예약 변경 완료`;
   return status === 'CONFLICT'
-    ? `예약 변경 완료. 청소 일정 조정 필요. ${GUIDANCE.CONFLICT}`
-    : `예약 변경 완료. ${GUIDANCE[status]}`;
+    ? `${id} 예약 변경 완료. 청소 일정 조정 필요. ${GUIDANCE.CONFLICT}`
+    : `${id} 예약 변경 완료. ${GUIDANCE[status]}`;
 }
 
 export default function ReservationsPage() {
@@ -61,7 +62,12 @@ export default function ReservationsPage() {
   const selected = rows.find((r) => r.id === selectedId) ?? null;
   const resultShown = !!result && !!selected && result.reservationId === selected.id;
   const resultCurrent = result ? rows.find((r) => r.id === result.reservationId) ?? result.saved : null;
-  const announced = result && resultCurrent ? resultAnnouncement(statusOf(resultCurrent)) : '';
+  const resultStatus = statusOf(resultCurrent);
+  const [announced, announce] = useAnnouncer();
+  // Every save (and every later judgment change of its result) is announced, even if worded as before.
+  useEffect(() => {
+    if (result) announce(resultAnnouncement(result.reservationId, resultStatus));
+  }, [result, resultStatus, announce]);
 
   useEffect(() => {
     if (returnFocus) focusRow(`reservation-row-${returnFocus.id}`);
@@ -103,13 +109,12 @@ export default function ReservationsPage() {
                   <th>고객</th>
                   <th>체크아웃 예정</th>
                   <th>판정</th>
-                  <th aria-label="작업" />
                 </tr>
               </thead>
               <tbody>
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="empty">
+                    <td colSpan={5} className="empty">
                       표시할 예약이 없습니다.
                     </td>
                   </tr>
@@ -143,25 +148,10 @@ export default function ReservationsPage() {
                         className={r.checkoutAt ? 'cell-time' : 'missing'}
                         data-label="체크아웃 예정"
                       >
-                        {checkoutText(r)}
+                        <span className="time-main">{checkoutText(r)}</span>
                       </td>
                       <td className="cell-status" data-label="판정">
                         <StatusBadge status={status} />
-                      </td>
-                      <td className="actions">
-                        <button
-                          type="button"
-                          className="btn-small"
-                          disabled={cancelled}
-                          title={cancelled ? '취소된 예약은 변경할 수 없습니다.' : undefined}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedId(r.id);
-                            setEditingId(r.id);
-                          }}
-                        >
-                          체크아웃 변경
-                        </button>
                       </td>
                     </tr>
                   );
@@ -186,19 +176,6 @@ export default function ReservationsPage() {
                   목록으로
                 </button>
               </div>
-              <dl className="facts">
-                <dt>객실</dt>
-                <dd>{selected.roomId}</dd>
-                <dt>고객</dt>
-                <dd>
-                  {selected.guestName}
-                  {selected.status === 'CANCELLED' && <span className="tag-cancelled">취소</span>}
-                </dd>
-                <dt>체크아웃 예정</dt>
-                <dd className={selected.checkoutAt ? 'tnum strong' : 'missing'}>
-                  {checkoutText(selected)}
-                </dd>
-              </dl>
 
               {selected.status === 'CANCELLED' ? (
                 <p className="inline-notice notice-muted">취소된 예약은 변경할 수 없습니다.</p>
@@ -315,6 +292,7 @@ function CheckoutEditor({
             data-testid="checkout-input"
             value={input}
             onChange={(e) => draft.edit(e.target.value)}
+            {...draft.inputProps}
             required
           />
         </label>
@@ -332,12 +310,11 @@ function CheckoutEditor({
           />
         </label>
       </div>
-      {draft.remoteChanged && notice?.kind !== 'conflict' && (
-        <RemoteChangeNotice
-          latestAt={reservation.checkoutAt}
-          onReload={() => draft.reset(isoToKstInput(reservation.checkoutAt), reservation.version)}
-        />
-      )}
+      <RemoteChangeNotice
+        show={draft.remoteChanged && notice?.kind !== 'conflict'}
+        latestAt={reservation.checkoutAt}
+        onReload={() => draft.reset(isoToKstInput(reservation.checkoutAt), reservation.version)}
+      />
       <SaveNoticeView notice={notice} />
       <div className="editor-actions">
         <button type="submit" className="primary" data-testid="checkout-save" disabled={!canSave}>
@@ -417,7 +394,7 @@ function ChangeResultPanel({ result, current }: { result: ChangeResult; current:
           <p className="result-resolved" data-testid="result-resolved">
             청소 일정 조정됨 · {resolvedBy.actor.displayName}{' '}
             <time className="tnum" dateTime={resolvedBy.createdAt}>
-              {formatKstTime(resolvedBy.createdAt)}
+              {formatKst(resolvedBy.createdAt)}
             </time>
           </p>
         )}

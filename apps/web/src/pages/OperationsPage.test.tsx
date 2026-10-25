@@ -106,6 +106,9 @@ describe('OperationsPage', () => {
       version: 1,
     });
     expect(await screen.findByTestId('recheck-result')).toHaveTextContent('재점검 결과: 정상');
+    // The own save is reported by the recheck result, not by the list announcer.
+    await new Promise((r) => setTimeout(r, 80));
+    expect(screen.getByTestId('judgment-announcer')).toBeEmptyDOMElement();
     // R-101 is NORMAL now: drops out of the action-required list but stays selected
     await waitFor(() => expect(screen.queryByTestId('inspection-row-R-101')).not.toBeInTheDocument());
     expect(screen.getByTestId('detail-panel')).toHaveTextContent('R-101');
@@ -350,8 +353,8 @@ describe('OperationsPage live changes', () => {
     await queryClient.invalidateQueries();
     await waitFor(() => expect(screen.getByTestId('inspection-row-R-107').className).toMatch(/row-flash/));
     expect(screen.getByTestId('inspection-row-R-101').className).not.toMatch(/row-flash/);
-    expect(screen.getByTestId('judgment-announcer')).toHaveTextContent(
-      'R-107 불일치, R-104 정상으로 변경',
+    await waitFor(() =>
+      expect(screen.getByTestId('judgment-announcer')).toHaveTextContent('R-107 불일치, R-104 정상으로 변경'),
     );
   });
 
@@ -449,13 +452,149 @@ describe('OperationsPage list efficiency', () => {
     await user.click(await screen.findByTestId('inspection-row-R-101'));
     const panel = screen.getByTestId('detail-panel');
     expect(within(panel).getByTestId('cleaning-checkout')).toHaveTextContent('10/26 13:00');
-    // 11:30 is before the 13:00 checkout: warned, but saving stays possible
+    const input = within(panel).getByTestId('cleaning-input');
+    expect(input).toHaveAttribute('aria-describedby', 'cleaning-checkout cleaning-warn');
+    expect(document.getElementById('cleaning-checkout')).not.toContainElement(
+      within(panel).getByRole('button', { name: '체크아웃 +30분' }),
+    );
+    // The untouched current value is not warned about (the judgment already says so).
+    expect(within(panel).queryByTestId('cleaning-before-checkout')).not.toBeInTheDocument();
+    // An entered 11:45 is before the 13:00 checkout: warned in a status region, saving stays possible
+    fireEvent.change(input, { target: { value: '2026-10-26T11:45' } });
     expect(within(panel).getByTestId('cleaning-before-checkout')).toHaveTextContent(
       '체크아웃보다 이른 시각입니다.',
     );
+    expect(document.getElementById('cleaning-warn')).toHaveAttribute('role', 'status');
     expect(within(panel).getByTestId('cleaning-save')).toBeEnabled();
     await user.click(within(panel).getByRole('button', { name: '체크아웃 +30분' }));
     expect(within(panel).getByTestId('cleaning-input')).toHaveValue('2026-10-26T13:30');
     expect(within(panel).queryByTestId('cleaning-before-checkout')).not.toBeInTheDocument();
+  });
+});
+
+describe('OperationsPage review fixes', () => {
+  const withCleaning = (version: number, at: string) =>
+    fixture().map((r) =>
+      r.id === 'R-101'
+        ? makeReservation('R-101', {
+            status: 'CONFLICT',
+            checkoutAt: '2026-10-26T04:00:00.000Z',
+            cleaning: { scheduledStartAt: at, version },
+          })
+        : r,
+    );
+
+  /** Every text the live region shows, in order (to see clear-then-fill). */
+  function recordTexts(el: HTMLElement): string[] {
+    const seen: string[] = [];
+    new MutationObserver(() => seen.push(el.textContent ?? '')).observe(el, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+    return seen;
+  }
+
+  it('highlights and announces a data change that keeps the judgment, also when repeated', async () => {
+    const { queryClient } = renderWithClient(<OperationsPage />);
+    await screen.findByTestId('inspection-row-R-101');
+    const live = screen.getByTestId('judgment-announcer');
+    const seen = recordTexts(live);
+
+    mocked.listInspections.mockResolvedValue(withCleaning(2, '2026-10-26T02:45:00.000Z'));
+    await queryClient.invalidateQueries();
+    await waitFor(() => expect(live).toHaveTextContent('R-101 청소 시작 변경'));
+    expect(screen.getByTestId('inspection-row-R-101').className).toMatch(/row-flash/);
+
+    mocked.listInspections.mockResolvedValue(withCleaning(3, '2026-10-26T03:00:00.000Z'));
+    await queryClient.invalidateQueries();
+    await waitFor(() =>
+      expect(seen.filter((t) => t === 'R-101 청소 시작 변경')).toHaveLength(2),
+    );
+    // cleared between the two identical messages so the second one is read out too
+    const first = seen.indexOf('R-101 청소 시작 변경');
+    expect(seen.slice(first + 1)).toContain('');
+  });
+
+  it('j/k do not move away from an edited cleaning time or from inside the form', async () => {
+    const user = userEvent.setup();
+    renderWithClient(<OperationsPage />);
+    await user.click(await screen.findByTestId('inspection-row-R-101'));
+    // focus inside the form (save button): no navigation
+    screen.getByTestId('cleaning-save').focus();
+    await user.keyboard('j');
+    expect(screen.getByTestId('inspection-row-R-101')).toHaveAttribute('aria-current', 'true');
+    // edited value, focus back on the list: still no navigation, the typed value survives
+    fireEvent.change(screen.getByTestId('cleaning-input'), { target: { value: '2026-10-26T13:30' } });
+    screen.getByRole('button', { name: 'R-101 상세 보기' }).focus();
+    await user.keyboard('j');
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByTestId('inspection-row-R-101')).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByTestId('cleaning-input')).toHaveValue('2026-10-26T13:30');
+  });
+
+  it('j/k work by physical key while a Korean IME is active', async () => {
+    renderWithClient(<OperationsPage />);
+    await screen.findByTestId('inspection-row-R-101');
+    fireEvent.keyDown(document.body, { key: 'ㅓ', code: 'KeyJ' });
+    expect(screen.getByTestId('inspection-row-R-101')).toHaveAttribute('aria-current', 'true');
+    fireEvent.keyDown(document.body, { key: 'ㅓ', code: 'KeyJ' });
+    expect(screen.getByTestId('inspection-row-R-103')).toHaveAttribute('aria-current', 'true');
+    fireEvent.keyDown(document.body, { key: 'ㅏ', code: 'KeyK' });
+    expect(screen.getByTestId('inspection-row-R-101')).toHaveAttribute('aria-current', 'true');
+  });
+
+  it('does not resync the untouched input while it has focus; resyncs on blur', async () => {
+    const user = userEvent.setup();
+    const { queryClient } = renderWithClient(<OperationsPage />);
+    await user.click(await screen.findByTestId('inspection-row-R-101'));
+    const input = screen.getByTestId('cleaning-input');
+    fireEvent.focus(input);
+    mocked.listInspections.mockResolvedValue(withCleaning(2, '2026-10-26T03:00:00.000Z'));
+    await queryClient.invalidateQueries();
+    await waitFor(() =>
+      expect(screen.getByTestId('inspection-row-R-101')).toHaveTextContent('10/26 12:00'),
+    );
+    expect(input).toHaveValue('2026-10-26T11:30');
+    fireEvent.blur(input);
+    await waitFor(() => expect(input).toHaveValue('2026-10-26T12:00'));
+  });
+
+  it('the remote-change notice appears inside an always-mounted live region', async () => {
+    const user = userEvent.setup();
+    const { queryClient } = renderWithClient(<OperationsPage />);
+    await user.click(await screen.findByTestId('inspection-row-R-101'));
+    const form = screen.getByRole('form', { name: 'R-101 청소 일정 수정' });
+    const slot = form.querySelector('.live-slot')!;
+    expect(slot).toHaveAttribute('aria-live', 'polite');
+    expect(slot).toBeEmptyDOMElement();
+    fireEvent.change(screen.getByTestId('cleaning-input'), { target: { value: '2026-10-26T13:30' } });
+    mocked.listInspections.mockResolvedValue(withCleaning(2, '2026-10-26T03:00:00.000Z'));
+    await queryClient.invalidateQueries();
+    expect(await within(slot as HTMLElement).findByTestId('remote-change-notice')).toBeInTheDocument();
+  });
+
+  it('filters with one row of chips; zero counts are muted', async () => {
+    renderWithClient(<OperationsPage />);
+    await screen.findByTestId('inspection-row-R-101');
+    const group = screen.getByRole('group', { name: '판정별 보기' });
+    const labels = within(group)
+      .getAllByRole('button')
+      .map((b) => b.textContent);
+    expect(labels).toEqual(['조치 필요 3', '불일치 1', '확인 필요 1', '판정 불가 1', '정상 1', '제외 0', '전체 4']);
+    expect(screen.getByTestId('summary-EXCLUDED')).toHaveClass('is-zero');
+    expect(screen.getByTestId('summary-CONFLICT')).toHaveClass('has-items');
+  });
+
+  it('detail shows id, badge and reason on one line without repeating the row facts', async () => {
+    const user = userEvent.setup();
+    renderWithClient(<OperationsPage />);
+    await user.click(await screen.findByTestId('inspection-row-R-101'));
+    const panel = screen.getByTestId('detail-panel');
+    const head = panel.querySelector('.detail-head')!;
+    expect(head).toHaveTextContent('R-101');
+    expect(head).toHaveTextContent('체크아웃 이전에 청소 시작 예정');
+    expect(panel).not.toHaveTextContent('고객101');
+    expect(panel).not.toHaveTextContent('101호');
   });
 });

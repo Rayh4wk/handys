@@ -40,16 +40,23 @@ beforeEach(() => {
   mocked.auditLogs.mockResolvedValue([]);
 });
 
+/** Select the row, then use the detail panel's single 체크아웃 변경 action. */
+async function openFromRow(user: ReturnType<typeof userEvent.setup>, row: HTMLElement) {
+  await user.click(row);
+  const detail = screen.getByRole('region', { name: '선택한 예약' });
+  await user.click(within(detail).getByRole('button', { name: '체크아웃 변경' }));
+}
+
 async function openEditor(id = 'R-101') {
   const user = userEvent.setup();
   const { queryClient } = renderWithClient(<ReservationsPage />);
   const row = await screen.findByTestId(`reservation-row-${id}`);
-  await user.click(within(row).getByRole('button', { name: '체크아웃 변경' }));
+  await openFromRow(user, row);
   return { user, queryClient, editor: screen.getByTestId('checkout-editor') };
 }
 
 describe('ReservationsPage', () => {
-  it('renders the table with 정보 누락 for missing checkout and disabled change for cancelled', async () => {
+  it('renders the table with 정보 누락 for missing checkout and no change action for cancelled', async () => {
     renderWithClient(<ReservationsPage />);
     expect(screen.getByRole('heading', { name: '예약 관리' })).toBeInTheDocument();
     const r101 = await screen.findByTestId('reservation-row-R-101');
@@ -57,9 +64,24 @@ describe('ReservationsPage', () => {
     expect(r101).toHaveTextContent('고객101');
     expect(r101).toHaveTextContent('10/26 11:00');
     expect(screen.getByTestId('reservation-row-R-104')).toHaveTextContent('정보 누락');
-    expect(
-      within(screen.getByTestId('reservation-row-R-105')).getByRole('button', { name: '체크아웃 변경' }),
-    ).toBeDisabled();
+    // rows carry no per-row action; the cancelled row is marked by its tag and badge
+    expect(screen.queryAllByRole('button', { name: '체크아웃 변경' })).toHaveLength(0);
+    const r105 = screen.getByTestId('reservation-row-R-105');
+    expect(r105).toHaveTextContent('취소');
+    expect(within(r105).getByTestId('status-badge')).toHaveAttribute('data-status', 'EXCLUDED');
+    fireEvent.click(r105);
+    const detail = screen.getByRole('region', { name: '선택한 예약' });
+    expect(detail).toHaveTextContent('취소된 예약은 변경할 수 없습니다.');
+    expect(within(detail).queryByRole('button', { name: '체크아웃 변경' })).not.toBeInTheDocument();
+  });
+
+  it('the detail panel does not repeat the row facts', async () => {
+    const user = userEvent.setup();
+    renderWithClient(<ReservationsPage />);
+    await user.click(await screen.findByTestId('reservation-row-R-101'));
+    const detail = screen.getByRole('region', { name: '선택한 예약' });
+    expect(detail).not.toHaveTextContent('고객101');
+    expect(detail).not.toHaveTextContent('101호');
   });
 
   it('selects a row from the keyboard (cancelled rows included)', async () => {
@@ -215,7 +237,7 @@ describe('ReservationsPage', () => {
     const user = userEvent.setup();
     const { queryClient } = renderWithClient(<ReservationsPage />);
     const row = await screen.findByTestId('reservation-row-R-101');
-    await user.click(within(row).getByRole('button', { name: '체크아웃 변경' }));
+    await openFromRow(user, row);
     mocked.listReservations.mockResolvedValue(movedByOther());
     await queryClient.invalidateQueries();
     await waitFor(() => expect(screen.getByTestId('checkout-input')).toHaveValue('2026-10-26T12:00'));
@@ -234,7 +256,7 @@ describe('ReservationsPage', () => {
     const user = userEvent.setup();
     const { queryClient } = renderWithClient(<ReservationsPage />);
     const row = await screen.findByTestId('reservation-row-R-101');
-    await user.click(within(row).getByRole('button', { name: '체크아웃 변경' }));
+    await openFromRow(user, row);
     fireEvent.change(screen.getByTestId('checkout-input'), { target: { value: '2026-10-26T14:00' } });
     mocked.listReservations.mockResolvedValue(movedByOther());
     await queryClient.invalidateQueries();
@@ -260,7 +282,7 @@ describe('ReservationsPage', () => {
     const user = userEvent.setup();
     const { queryClient } = renderWithClient(<ReservationsPage />);
     const row = await screen.findByTestId('reservation-row-R-101');
-    await user.click(within(row).getByRole('button', { name: '체크아웃 변경' }));
+    await openFromRow(user, row);
     fireEvent.change(screen.getByTestId('checkout-input'), { target: { value: '2026-10-26T14:00' } });
     mocked.listReservations.mockResolvedValue(movedByOther());
     await queryClient.invalidateQueries();
@@ -321,8 +343,10 @@ describe('ReservationsPage change result', () => {
     expect(live).toBeEmptyDOMElement();
     cleanup();
     await saveConflict();
-    expect(screen.getByTestId('result-announcer')).toHaveTextContent(
-      '예약 변경 완료. 청소 일정 조정 필요.',
+    await waitFor(() =>
+      expect(screen.getByTestId('result-announcer')).toHaveTextContent(
+        'R-101 예약 변경 완료. 청소 일정 조정 필요.',
+      ),
     );
     expect(screen.getByTestId('change-result')).not.toHaveAttribute('aria-live');
   });
@@ -373,7 +397,7 @@ describe('ReservationsPage change result', () => {
     await queryClient.invalidateQueries();
     await waitFor(() => expect(panel).toHaveAttribute('data-result', 'NORMAL'));
     expect(await within(panel).findByTestId('result-resolved')).toHaveTextContent(
-      '청소 일정 조정됨 · 현장 운영 박현장 21:47',
+      '청소 일정 조정됨 · 현장 운영 박현장 10/25 21:47',
     );
   });
 
@@ -389,5 +413,27 @@ describe('ReservationsPage change result', () => {
     const panel = await screen.findByTestId('change-result');
     expect(panel).toHaveTextContent('체크아웃: 10/26 11:00 → 10/27 00:30');
     expect(panel).toHaveTextContent('기존 청소 시작: 10/26 11:30');
+  });
+
+  it('announces a second, identically worded result again', async () => {
+    const { user, panel } = await saveConflict();
+    void panel;
+    const live = screen.getByTestId('result-announcer');
+    const text = `R-101 예약 변경 완료. 청소 일정 조정 필요. ${'체크아웃 이전에 청소가 예정되어 있습니다. 운영 담당자의 일정 조정이 필요합니다.'}`;
+    await waitFor(() => expect(live).toHaveTextContent(text));
+    const seen: string[] = [];
+    new MutationObserver(() => seen.push(live.textContent ?? '')).observe(live, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+    // same change saved again (e.g. after the guest confirms): same wording
+    mocked.changeCheckout.mockResolvedValue({ ...conflictResponse, version: 3 });
+    const detail = screen.getByRole('region', { name: '선택한 예약' });
+    await user.click(within(detail).getByRole('button', { name: '체크아웃 변경' }));
+    const editor = screen.getByTestId('checkout-editor');
+    await user.type(within(editor).getByTestId('checkout-reason'), '고객 재확인');
+    await user.click(within(editor).getByTestId('checkout-save'));
+    await waitFor(() => expect(seen).toEqual(['', text]));
   });
 });

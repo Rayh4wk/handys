@@ -1,12 +1,11 @@
 import { useNavigate } from 'react-router-dom';
-import { ROLE_LABEL } from '../api/types';
 import { useAuth } from '../auth/authContext';
 import { isDemoMode } from '../lib/demo';
 import { formatKstClock } from '../lib/kst';
 import { useRealtime, type RealtimeState } from '../realtime/realtimeContext';
 
 const STATE_LABEL: Record<RealtimeState, string> = {
-  open: '연결됨',
+  open: '실시간 연결됨',
   reconnecting: '재연결 중',
   disconnected: '끊김',
   connecting: '연결 중',
@@ -32,14 +31,19 @@ export default function Header() {
           <span className="brand-mark" aria-hidden />
           청소 일정 점검
         </div>
-        <div className="realtime">
-          <span className={`conn conn-${state}`}>
+        <div className={`realtime ${stale ? 'realtime-stale' : ''}`}>
+          {/* Connected is the normal state: a dot only. The text and time appear when it is not. */}
+          <span className={`conn conn-${state}`} title={state === 'open' ? '실시간 연결됨' : undefined}>
             <span className={`sse-dot sse-${state}`} aria-hidden />
-            <span data-testid="sse-state" data-state={state}>
+            <span
+              className={stale ? undefined : 'sr-only'}
+              data-testid="sse-state"
+              data-state={state}
+            >
               {STATE_LABEL[state]}
             </span>
           </span>
-          <span className="last-updated">
+          <span className={stale ? 'last-updated' : 'sr-only'}>
             마지막 갱신{' '}
             <span className="tnum" data-testid="last-updated">
               {lastUpdatedAt ? formatKstClock(lastUpdatedAt.toISOString()) : '-'}
@@ -58,7 +62,6 @@ export default function Header() {
         </div>
         <div className="account">
           <span className="account-name">{me.displayName}</span>
-          <span className={`role-badge role-${me.role}`}>{ROLE_LABEL[me.role]}</span>
           <button type="button" className="btn-small" data-testid="logout" onClick={onLogout}>
             로그아웃
           </button>

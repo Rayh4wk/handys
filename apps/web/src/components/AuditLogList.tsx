@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { api, queryKeys } from '../api/client';
-import { ACTION_LABEL, ROLE_LABEL, STATUS_LABEL, type AuditLogView, type AuditSnapshot } from '../api/types';
+import { ACTION_LABEL, STATUS_LABEL, type AuditLogView, type AuditSnapshot } from '../api/types';
 import { formatKst } from '../lib/kst';
 
 const NONE = '정보 없음';
@@ -57,10 +57,8 @@ export default function AuditLogList({ reservationId }: { reservationId: string 
             <dt>사유</dt>
             <dd>{log.reason?.trim() ? log.reason : '-'}</dd>
             <dt>변경자</dt>
-            <dd>
-              {log.actor.displayName}{' '}
-              <span className="muted">({ROLE_LABEL[log.actor.role] ?? log.actor.role})</span>
-            </dd>
+            {/* The display name already carries the role (e.g. "현장 운영 박현장"). */}
+            <dd>{log.actor.displayName}</dd>
           </dl>
         </li>
       ))}

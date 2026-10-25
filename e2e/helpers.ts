@@ -71,9 +71,10 @@ export async function setOpsFilter(page: Page, value: string): Promise<void> {
   await expect(tile).toHaveAttribute('aria-pressed', 'true');
 }
 
-/** Opens the checkout editor for a reservation on the agent screen. */
+/** Opens the checkout editor on the agent screen: select the row, then the detail panel's action. */
 export async function openCheckoutEditor(page: Page, id: string): Promise<Locator> {
-  await reservationRow(page, id).getByRole('button', { name: '체크아웃 변경' }).click();
+  await reservationRow(page, id).click();
+  await page.getByRole('region', { name: '선택한 예약' }).getByRole('button', { name: '체크아웃 변경' }).click();
   const editor = page.getByTestId('checkout-editor');
   await expect(editor).toBeVisible();
   return editor;
