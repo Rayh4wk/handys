@@ -88,7 +88,8 @@ README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
 | 4 | Task 8 (쓰기 경로+SSE) | W3 |
 | 4.5 | Task 12 (ESLint·typecheck 게이트) | W4 + Task 7 |
 | 5 | Task 9 (정적 서빙+Playwright+Docker) | W4.5 |
-| 6 | Task 10 (제출 문서) | W5 |
+| 5.5 | Task 13 (UI 완성도 + 로컬 실행 경로 + 시각 검수) | W5 |
+| 6 | Task 10 (제출 문서) | W5.5 |
 
 ---
 
@@ -370,3 +371,22 @@ README.md, DESIGN.md, TEST_REPORT.md, AI_USAGE.md
 - [ ] **Step 3:** 오류를 규칙 끄기가 아닌 코드 수정으로 해결(불가피한 경우만 라인 단위 disable + 이유 주석).
 - [ ] **Step 4: 검증** — `npm run lint`(0 problems), `npm run typecheck`(출력 없음), `npm test`, `npm run test:int` 모두 PASS, `npm run build` 성공.
 - [ ] **Step 5: Commit** `chore: add ESLint flat config and typecheck gate; fix violations`
+
+### Task 13: UI 완성도 + 로컬 실행 경로 + 시각 검수
+
+사용자가 직접 로컬에서 두 브라우저로 시연·검수한다. 기능 테스트 외에 **화면을 실제로 띄워 눈으로 확인**하는 단계.
+
+**Files:**
+- Modify: `apps/web/src/styles.css`, `apps/web/src/**/*.tsx`(마크업·클래스, **data-testid와 고정 문구는 유지**), `apps/web/vite.config.ts`(proxy target을 `API_PORT` env로, 기본 3000), 루트 `package.json`(`setup`, `dev` 스크립트), `apps/server/package.json`(필요 시)
+- Create: `apps/e2e/tests/visual.spec.ts`(스크린샷 캡처 — 단언은 레이아웃 기본만: 가로 스크롤 없음, 주요 영역 visible), `docs/screenshots/*.png`
+
+**Interfaces:**
+- Produces: 루트 `npm run setup` = dev DB(`handys`) `prisma migrate deploy` + 시드(재실행 가능하도록 시드 전 리셋 또는 upsert); 루트 `npm run dev` = 서버 watch(`PORT` env, 기본 3000) + Vite dev(5173, `/api` → `http://localhost:${API_PORT ?? 3000}`) 동시 실행(`concurrently` devDependency 허용). README(Task 10)가 이 명령을 인용.
+
+- [ ] **Step 1:** `frontend-design` 스킬을 Skill 도구로 불러 지침에 따라 미적 방향 결정(차분한 운영 도구, 정보 밀도 높되 판독성 우선, 한국어 타이포그래피 — `Pretendard` 등 웹폰트는 CDN 허용, 없으면 system-ui). 판정 배지 색·아이콘·대비(WCAG AA), 표의 체크아웃|청소 나란히 비교 시각화(충돌 시 청소 시각 강조), 결과 패널 위계("예약 변경 완료" vs "청소 일정 조정 필요"), 빈 상태/로딩/오류/409 안내, 연결 상태 배지, 로그인 화면(데모 계정 안내 카드), 1280px·768px·390px 반응형.
+- [ ] **Step 2:** `npm run setup` + `npm run dev`로 실제 띄우고(포트 3000 점유 시 `PORT=3200 API_PORT=3200`), Playwright로 agent·ops 화면을 1280/390 폭에서 캡처: 로그인, 예약 화면 초기, 체크아웃 13:00 저장 후 결과 패널(CONFLICT), 운영 화면 조치 필요 목록, 상세 패널+이력, 청소 13:30 저장 후 정상. 스크린샷을 직접 Read로 보고 문제 목록 작성 → 수정 → 재캡처. 최종본을 `docs/screenshots/`에 저장.
+- [ ] **Step 3: 검증** — `npm test`, `npm run lint`, `npm run typecheck`, `npm run e2e` 모두 PASS(기존 testid 흐름 회귀 없음).
+- [ ] **Step 4: Commit** `feat(web): polish role screens UI, local dev scripts, visual QA screenshots`
+
+### Task 10 보강 (AI_USAGE 근거)
+- Task 10 Step 5의 근거로 SDD ledger(`.superpowers/sdd/.../progress.md`)의 Ruling·리뷰 발견·수정 기록을 사용한다. 컨트롤러는 ledger 삭제 전에 Task 10 구현자에게 ledger 경로를 넘긴다.
